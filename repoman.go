@@ -74,7 +74,7 @@ func (m *RepoManager) ListRepos(username string) ([]string, error) {
 	entries, err := os.ReadDir(userPath)
 	if err != nil {
 		// If the user directory doesn't exist, return an error
-		os.Mkdir(m.BaseDir+filepath.Clean(username), 0755)
+		os.Mkdir(m.BaseDir+"/"+filepath.Clean(username), 0755)
 	}
 
 	var repos []string

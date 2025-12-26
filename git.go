@@ -29,7 +29,7 @@ func main() {
 		tmpl.Execute(w, nil)
 	})
 	http.HandleFunc("/check-user", store.HandleCheckUser)
-	// Todo: http.HandleFunc("/logout", HandleLogout)
+	http.HandleFunc("/logout", store.HandleLogout)
 	http.HandleFunc("/", mgr.HandleDashboard) // Todo: show repos/users
 	// Future: http.HandleFunc("/repo/", mgr.HandleRepoView)
 

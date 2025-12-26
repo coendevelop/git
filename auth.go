@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -16,6 +17,11 @@ func generateSessionToken() string {
 	b := make([]byte, 32)
 	rand.Read(b)
 	return base64.URLEncoding.EncodeToString(b)
+}
+
+func (s *AuthStore) DeleteSession(token string) error {
+	_, err := s.db.Exec("DELETE FROM sessions WHERE token = ?", token)
+	return err
 }
 
 // CreateSession generates a token and saves it to the DB
@@ -153,11 +159,35 @@ func (s *AuthStore) HandleLogin(w http.ResponseWriter, r *http.Request) {
 
 	valid, _ := s.VerifyUser(username, password)
 	if !valid {
-		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+		http.Redirect(w, r, "/auth", http.StatusUnauthorized)
+		time.Sleep(5)
 		return
 	}
 
 	s.setSessionCookie(w, username)
 
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+}
+func (s *AuthStore) HandleLogout(w http.ResponseWriter, r *http.Request) {
+	// 1. Get the token from the cookie
+	cookie, err := r.Cookie("session_token")
+	if err == nil {
+		// 2. Delete from database if it exists
+		s.DeleteSession(cookie.Value)
+	}
+
+	// 3. Tell the browser to delete the cookie
+	newCookie := &http.Cookie{
+		Name:     "session_token",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		MaxAge:   -1,              // Forces immediate expiration
+		Expires:  time.Unix(0, 0), // Old-school compatibility
+	}
+	http.SetCookie(w, newCookie)
+
+	log.Printf("Successful logout for %s", cookie.Value)
+	// 4. Redirect to the all-in-one auth page
+	http.Redirect(w, r, "/auth", http.StatusSeeOther)
 }
