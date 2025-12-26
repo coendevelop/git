@@ -25,46 +25,65 @@ type RepoManager struct {
 	templateCache map[string]*template.Template
 }
 
-// NewRepoManager now initializes the templates once
 func NewRepoManager(baseDir string, store *AuthStore) (*RepoManager, error) {
 	mgr := &RepoManager{
-		BaseDir:       baseDir,
-		Store:         store,
-		templateCache: make(map[string]*template.Template),
+		BaseDir: baseDir,
+		Store:   store,
 	}
 
-	// Pre-parse all templates in the folder
-	files, err := filepath.Glob("templates/*.tmpl")
+	// 1. Initialize an empty template set
+	tmplSet := template.New("")
+
+	// 2. Walk through the templates directory
+	err := filepath.Walk("templates", func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// 3. Only process .tmpl files
+		if !info.IsDir() && strings.HasSuffix(path, ".tmpl") {
+			// Create the name: e.g., "auth.tmpl" or "base/footer.tmpl"
+			name := strings.TrimPrefix(path, "templates/")
+			name = filepath.ToSlash(name) // Ensure forward slashes on Windows
+
+			// Read the file content
+			b, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+
+			// 4. Associate the content with the specific name in the set
+			_, err = tmplSet.New(name).Parse(string(b))
+			if err != nil {
+				return err
+			}
+			log.Printf("Loaded template into set: %s", name)
+		}
+		return nil
+	})
+
 	if err != nil {
 		return nil, err
 	}
 
-	for _, file := range files {
-		// filepath.Base("templates/repo_view.tmpl") becomes "repo_view.tmpl"
-		name := filepath.Base(file)
-		tmpl, err := template.ParseFiles(file)
-		if err != nil {
-			return nil, err
-		}
-		mgr.templateCache[name] = tmpl
-		log.Printf("Loaded template: %s", name) // Debug to see exactly what's in cache
+	mgr.templateCache = map[string]*template.Template{
+		"root": tmplSet,
 	}
 
 	return mgr, nil
 }
 
 func (m *RepoManager) renderTemplate(w http.ResponseWriter, name string, data interface{}) {
-	tmpl, ok := m.templateCache[name]
-	if !ok {
-		log.Printf("TEMPLATE ERROR: %s not found in cache", name)
-		http.Error(w, "Template not found", http.StatusInternalServerError)
-		return
-	}
+	// We always use the "root" set
+	tmpl := m.templateCache["root"]
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := tmpl.Execute(w, data); err != nil {
+
+	// ExecuteTemplate looks for the specific name WITHIN the set
+	err := tmpl.ExecuteTemplate(w, name, data)
+	if err != nil {
 		log.Printf("RENDER ERROR: %s: %v", name, err)
-		// Header is likely already sent, so we log the error
+		http.Error(w, "Template error", 500)
 	}
 }
 
@@ -116,30 +135,26 @@ func (m *RepoManager) DeleteRepo(username, repoName string) error {
 	return nil
 }
 
-// TODO: Return ALL repos from database
-// TODO: Add checks for "Private Repository" or "Private Profile"
-// Return a list of repositories
-func (m *RepoManager) ListRepos(username string) ([]string, error) {
-	// 1. Sanitize and build the path
-	userPath := filepath.Join(m.BaseDir, filepath.Clean(username))
+func (m *RepoManager) ListUserRepos(username string) ([]string, error) {
+	userDir := filepath.Join(m.BaseDir, username)
 
-	// 2. Read the directory entries
-	entries, err := os.ReadDir(userPath)
+	// Create the directory if it doesn't exist yet
+	if _, err := os.Stat(userDir); os.IsNotExist(err) {
+		return []string{}, nil
+	}
+
+	files, err := os.ReadDir(userDir)
 	if err != nil {
-		// If the user directory doesn't exist, create it
-		os.MkdirAll(userPath, 0755)
+		return nil, err
 	}
 
 	var repos []string
-	for _, entry := range entries {
-		// 3. Only add it to the list if it's a directory
-		if entry.IsDir() {
-			// Clean up the name by removing the ".git" suffix for a cleaner list
-			name := strings.TrimSuffix(entry.Name(), ".git")
-			repos = append(repos, name)
+	for _, f := range files {
+		if f.IsDir() && strings.HasSuffix(f.Name(), ".git") {
+			// Remove the .git suffix for the UI display
+			repos = append(repos, strings.TrimSuffix(f.Name(), ".git"))
 		}
 	}
-
 	return repos, nil
 }
 
@@ -202,7 +217,7 @@ func (m *RepoManager) HandleRepoView(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// If the repo is empty (no commits), show a specific message
 		if err.Error() == "reference not found" {
-			m.renderTemplate(w, "templates/repo_view.tmpl", map[string]interface{}{
+			m.renderTemplate(w, "repo_view.tmpl", map[string]interface{}{
 				"Username": username,
 				"RepoName": repoName,
 				"SSHPort":  "2222",
@@ -215,7 +230,7 @@ func (m *RepoManager) HandleRepoView(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 4. Render the file list
-	m.renderTemplate(w, "templates/repo_view.tmpl", map[string]interface{}{
+	m.renderTemplate(w, "repo_view.tmpl", map[string]interface{}{
 		"Username": username,
 		"RepoName": repoName,
 		"Files":    files,
@@ -227,7 +242,7 @@ func (m *RepoManager) HandleRepoNavigation(w http.ResponseWriter, r *http.Reques
 	repoPath := filepath.Join(m.BaseDir, username, repo+".git")
 	gitRepo, err := git.PlainOpen(repoPath)
 	if err != nil {
-		m.renderTemplate(w, "templates/repo_view.tmpl", map[string]interface{}{
+		m.renderTemplate(w, "repo_view.tmpl", map[string]interface{}{
 			"RepoName": repo,
 			"Username": username,
 		})

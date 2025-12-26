@@ -1,17 +1,4 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>{{.RepoName}} - Git@CoenDevelop</title>
-    <style>
-        body { font-family: sans-serif; margin: 40px; color: #333; }
-        .breadcrumb { font-size: 1.2rem; margin-bottom: 20px; }
-        .file-table { width: 100%; border-collapse: collapse; border: 1px solid #ddd; }
-        .file-table th, .file-table td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
-        .file-table tr:hover { background-color: #f5f5f5; }
-        .icon { margin-right: 10px; }
-        .btn-back { text-decoration: none; color: #0366d6; }
-    </style>
-</head>
+{{template "base/header.tmpl" .}}
 <body>
     <div class="breadcrumb">
         <a href="/dashboard" class="btn-back">Dashboard</a> / 
@@ -41,5 +28,4 @@
             {{end}}
         </tbody>
     </table>
-</body>
-</html>
+{{template "base/footer.tmpl" .}}

@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"html/template"
 	"log"
 	"net"
 	"net/http"
@@ -27,9 +26,10 @@ func main() {
 	// Registration/Login/Auth routing
 	http.HandleFunc("/register", store.HandleRegister)
 	http.HandleFunc("/login", store.HandleLogin)
+	// Use the mgr.renderTemplate to stay consistent with the cache
 	http.HandleFunc("/auth", func(w http.ResponseWriter, r *http.Request) {
-		tmpl, _ := template.ParseFS(templateFiles, "templates/auth.tmpl")
-		tmpl.Execute(w, nil)
+		// Note: We use the base name "auth.tmpl" as seen in your logs
+		mgr.renderTemplate(w, "auth.tmpl", nil)
 	})
 	http.HandleFunc("/check-user", store.HandleCheckUser)
 	http.HandleFunc("/logout", store.HandleLogout)

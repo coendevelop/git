@@ -1,26 +1,13 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>{{ .Username }}'s Repositories</title>
-    <style>
-        body { font-family: sans-serif; padding: 50px; line-height: 1.6; }
-        .repo-card { border: 1px solid #ddd; padding: 15px; margin-bottom: 10px; border-radius: 5px; }
-        .repo-name { font-weight: bold; color: #0366d6; text-decoration: none; }
-    </style>
-</head>
-<body>
+{{template "base/header.tmpl" .}}
     <h1>Welcome, {{ .Username }}</h1>
     <button id="logout-btn" action="/logout" method="POST">Logout</button>
     <hr>
-    <h3>Your Repositories</h3>
-    {{ range .Repos }}
-    <div class="repo-card">
-        <a class="repo-name" href="/view/{{ $.Username }}/{{ $.repoName }}">
-            {{ . }}
-        </a>
-    </div>
-    {{ else }}
-    <p>No repositories found. Start by creating a new one <a href="">here</a></p>
-    {{ end }}
-</body>
-</html>
+    <h2>Your Repositories</h2>
+    <ul>
+        {{range .Repos}}
+            <li><a href="/view/{{.}}">{{.}}</a></li>
+        {{else}}
+            <li>No repositories found. Create your first one!</li>
+        {{end}}
+    </ul>
+{{template "base/footer.tmpl".}}

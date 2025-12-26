@@ -1,7 +1,6 @@
 package main
 
 import (
-	"html/template"
 	"log"
 	"net/http"
 )
@@ -13,30 +12,22 @@ type DashboardData struct {
 }
 
 func (m *RepoManager) HandleDashboard(w http.ResponseWriter, r *http.Request) {
-	if m.Store == nil {
-		log.Println("Error: RepoManager has no AuthStore assigned!")
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-	cookie, err := r.Cookie("session_token")
+	username, err := m.Store.GetUserByTokenFromRequest(r)
 	if err != nil {
-		log.Println("Dashboard Redirect: No cookie found") // Debug log
 		http.Redirect(w, r, "/auth", http.StatusSeeOther)
-		return
-	}
-	username, err := m.Store.GetUserByToken(cookie.Value)
-	if err != nil {
-		log.Printf("Dashboard Redirect: Token %s not found in DB: %v", cookie.Value, err) // Debug log
-		http.Redirect(w, r, "/auth", http.StatusSeeOther)
-		return
-	}
-	repos, err := m.ListRepos(username)
-	if err != nil {
-		http.Error(w, "Failed to list repos", http.StatusInternalServerError)
 		return
 	}
 
-	data := DashboardData{Username: username, Repos: repos}
-	tmpl, _ := template.ParseFS(templateFiles, "templates/dashboard.tmpl")
-	tmpl.Execute(w, data)
+	// Fetch the actual folders from the disk
+	repos, err := m.ListUserRepos(username)
+	if err != nil {
+		log.Printf("Error listing repos for %s: %v", username, err)
+	}
+
+	data := map[string]interface{}{
+		"Username": username,
+		"Repos":    repos,
+	}
+
+	m.renderTemplate(w, "dashboard.tmpl", data)
 }
