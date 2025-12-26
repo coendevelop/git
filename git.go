@@ -22,6 +22,8 @@ func main() {
 		Store:   store,
 	}
 
+	// License link
+
 	// Registration/Login/Auth routing
 	http.HandleFunc("/register", store.HandleRegister)
 	http.HandleFunc("/login", store.HandleLogin)
@@ -35,7 +37,7 @@ func main() {
 	// Dashboard routing
 	http.HandleFunc("/", mgr.HandleDashboard) // Todo: show repos/users
 	// Example URL: /view/my-project/subdir/main.go
-	http.HandleFunc("/view/", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/view", func(w http.ResponseWriter, r *http.Request) {
 		// 1. Get user context
 		username, err := mgr.Store.GetUserByTokenFromRequest(r)
 		if err != nil {
@@ -58,10 +60,10 @@ func main() {
 	})
 
 	// Start Servers
-	go func() {
-		fmt.Println("Web UI: http://localhost:8080")
-		log.Fatal(http.ListenAndServe(":8080", nil))
-	}()
+	fmt.Println("Git.CoenDevelop.org")
+	fmt.Println("This software is licensed with the GNU-GPLv3.")
+	fmt.Println("For more information, see http://git.coendevelop.org/license")
+	fmt.Println("Web UI: http://localhost:8080")
 
 	config, err := setupSSHConfig(store)
 	if err != nil {
