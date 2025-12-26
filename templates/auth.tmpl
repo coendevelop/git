@@ -57,6 +57,13 @@
                 document.getElementById('confirmPassword').required = true;
             }
         };
+
+        authForm.onsubmit = () => {
+            // Disable the button and change text so the user knows it's working
+            const btn = document.getElementById('submitBtn');
+            btn.disabled = true;
+            btn.innerText = "Creating Account...";
+        };
     </script>
 </body>
 </html>

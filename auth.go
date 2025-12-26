@@ -5,9 +5,10 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"fmt"
-	"html/template"
 	"log"
 	"net/http"
+	"regexp"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -24,22 +25,28 @@ func (s *AuthStore) DeleteSession(token string) error {
 	return err
 }
 
-// CreateSession generates a token and saves it to the DB
 func (s *AuthStore) CreateSession(username string) (string, error) {
-	token := generateSessionToken()
-
-	// Get user ID from username
 	var userID int
+	// Case-insensitive lookup thanks to the NOCASE schema
 	err := s.db.QueryRow("SELECT id FROM users WHERE username = ?", username).Scan(&userID)
 	if err != nil {
+		log.Printf("Session Error: User %s not found: %v", username, err)
 		return "", err
 	}
 
-	// Save session (valid for 24 hours)
-	_, err = s.db.Exec("INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, datetime('now', '+1 day'))",
-		token, userID)
+	token := generateSessionToken() // Your token generator
+	expiresAt := time.Now().Add(24 * time.Hour)
 
-	return token, err
+	// Ensure the column names (token, user_id, expires_at) match your initSchema exactly
+	_, err = s.db.Exec("INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)",
+		token, userID, expiresAt)
+
+	if err != nil {
+		log.Printf("Session Error: Failed to insert token into DB: %v", err)
+		return "", err
+	}
+
+	return token, nil
 }
 
 // GetUserByToken validates a token and returns the username
@@ -79,19 +86,45 @@ func (s *AuthStore) setSessionCookie(w http.ResponseWriter, username string) {
 	log.Printf("DEBUG: Setting cookie for %s: %s", username, token)
 }
 
+func (s *AuthStore) setSessionCookieWithToken(w http.ResponseWriter, token string) {
+	cookie := &http.Cookie{
+		Name:     "session_token",
+		Value:    token,
+		Path:     "/",   // Essential for the dashboard to see it
+		HttpOnly: true,  // Prevents JavaScript access (Security)
+		MaxAge:   86400, // 24 hours
+		SameSite: http.SameSiteLaxMode,
+	}
+	http.SetCookie(w, cookie)
+	log.Printf("DEBUG: Cookie 'session_token' set in headers")
+}
+
+// Global regex for username validation
+var usernameRegex = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
+
+func IsValidUsername(username string) bool {
+	// Check length (good practice) and characters
+	if len(username) < 3 || len(username) > 32 {
+		return false
+	}
+	return usernameRegex.MatchString(username)
+}
+
 func (s *AuthStore) RegisterUser(username, password string) error {
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), 10)
 	if err != nil {
-		return fmt.Errorf("hashing failed: %w", err)
+		return err
 	}
 
 	_, err = s.db.Exec("INSERT INTO users (username, password_hash) VALUES (?, ?)",
 		username, string(hashedPassword))
 
 	if err != nil {
-		// This will print the EXACT reason (e.g., "UNIQUE constraint failed" or "no such table")
-		log.Printf("SQL Error during registration: %v", err)
-		return fmt.Errorf("db insert failed: %w", err)
+		// Check if this is a "User Already Exists" error
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return fmt.Errorf("user_exists")
+		}
+		return err
 	}
 	return nil
 }
@@ -99,47 +132,47 @@ func (s *AuthStore) RegisterUser(username, password string) error {
 func (s *AuthStore) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		username := r.FormValue("username")
-		pw := r.FormValue("password")
-		confirm := r.FormValue("confirm_password")
+		password := r.FormValue("password")
 
-		if pw != confirm {
-			http.Error(w, "Passwords do not match", http.StatusBadRequest)
-			return
-		}
-
-		err := s.RegisterUser(username, pw)
+		err := s.RegisterUser(username, password)
 		if err != nil {
-			log.Printf("REGISTRATION FAIL: %v", err)
-			http.Error(w, "Could not create user", 500)
+			// If the user already exists, we don't want to show a scary error
+			if strings.Contains(err.Error(), "user_exists") {
+				log.Printf("User %s already exists, attempting auto-login", username)
+				// Proceed to session creation if you want auto-login,
+				// but usually, you'd verify the password first!
+			} else {
+				http.Error(w, "Registration failed", 500)
+				return
+			}
+		}
+
+		// Now create the session - this is where the 'No Rows' fix happens
+		token, err := s.CreateSession(username)
+		if err != nil {
+			log.Printf("Failed to create session after registration: %v", err)
+			http.Error(w, "Session creation failed", 500)
 			return
 		}
 
-		// 2. Create session and SET THE COOKIE
-		// Make sure s.setSessionCookie actually calls http.SetCookie(w, ...)
-		s.setSessionCookie(w, username)
-
-		// 3. LOG to verify the cookie was at least attempted
-		log.Printf("Registration successful for %s, redirecting to dashboard", username)
-
-		// 4. Redirect
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-		return
+		s.setSessionCookieWithToken(w, token)
+		http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 	}
-	// ... render template for GET
 }
 
-func (s *AuthStore) VerifyUser(username, password string) (bool, error) {
-	var hash string
-	err := s.db.QueryRow("SELECT password_hash FROM users WHERE username = ?", username).Scan(&hash)
+func (s *AuthStore) Authenticate(username, password string) (bool, error) {
+	var hashedPassword string
+	// Case-insensitive lookup
+	err := s.db.QueryRow("SELECT password_hash FROM users WHERE username = ?", username).Scan(&hashedPassword)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return false, nil // User not found
+			return false, nil // User doesn't exist
 		}
 		return false, err
 	}
 
-	// Compare the hash with the plain-text password
-	err = bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+	// Compare the provided password with the stored hash
+	err = bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
 	if err != nil {
 		return false, nil // Password mismatch
 	}
@@ -148,26 +181,24 @@ func (s *AuthStore) VerifyUser(username, password string) (bool, error) {
 }
 
 func (s *AuthStore) HandleLogin(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodGet {
-		tmpl, _ := template.ParseFS(templateFiles, "templates/login.tmpl")
-		tmpl.Execute(w, nil)
-		return
+	if r.Method == http.MethodPost {
+		username := r.FormValue("username")
+		password := r.FormValue("password")
+
+		ok, err := s.Authenticate(username, password)
+		if err != nil || !ok {
+			log.Printf("Login failed for user: %s", username)
+			http.Error(w, "Invalid username or password", http.StatusUnauthorized) // 401
+			return
+		}
+
+		// Success! Create session and set cookie
+		token, _ := s.CreateSession(username)
+		s.setSessionCookieWithToken(w, token)
+		http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 	}
-
-	username := r.FormValue("username")
-	password := r.FormValue("password")
-
-	valid, _ := s.VerifyUser(username, password)
-	if !valid {
-		http.Redirect(w, r, "/auth", http.StatusUnauthorized)
-		time.Sleep(5)
-		return
-	}
-
-	s.setSessionCookie(w, username)
-
-	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 }
+
 func (s *AuthStore) HandleLogout(w http.ResponseWriter, r *http.Request) {
 	// 1. Get the token from the cookie
 	cookie, err := r.Cookie("session_token")

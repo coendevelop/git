@@ -15,6 +15,39 @@ type AuthStore struct {
 	db *sql.DB
 }
 
+const initSchema = `
+-- Users Table: Case-insensitive usernames
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL COLLATE NOCASE,
+    password_hash TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Public Keys Table: For SSH access
+CREATE TABLE IF NOT EXISTS public_keys (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    key_data TEXT NOT NULL UNIQUE, 
+    label TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- Sessions Table: For Web UI access
+CREATE TABLE IF NOT EXISTS sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token TEXT UNIQUE NOT NULL,
+    user_id INTEGER NOT NULL,
+    expires_at DATETIME NOT NULL,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
+`
+
 func NewAuthStore(dbPath string) (*AuthStore, error) {
 	// 1. Ensure the directory for the DB exists
 	dir := filepath.Dir(dbPath)
@@ -28,10 +61,7 @@ func NewAuthStore(dbPath string) (*AuthStore, error) {
 		return nil, err
 	}
 
-	_, err = db.Exec(`
-        CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, username TEXT UNIQUE, password_hash TEXT);
-        CREATE TABLE IF NOT EXISTS sessions (id INTEGER PRIMARY KEY, token TEXT UNIQUE, user_id INTEGER, expires_at DATETIME);
-    `)
+	_, err = db.Exec(initSchema)
 	return &AuthStore{db: db}, err
 }
 
