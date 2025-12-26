@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>{{.RepoName}} - GoGit</title>
+    <title>{{.RepoName}} - Git@CoenDevelop</title>
     <style>
         body { font-family: sans-serif; margin: 40px; color: #333; }
         .breadcrumb { font-size: 1.2rem; margin-bottom: 20px; }
