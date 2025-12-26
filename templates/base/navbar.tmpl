@@ -10,12 +10,18 @@
             </span>
             
             <div class="d-flex gap-2">
+                {{if $.IsLoggedIn}}
                 <button type="button" class="btn btn-sm btn-primary px-3 shadow-sm" data-bs-toggle="modal" data-bs-target="#createRepoModal">
                     <strong>+</strong> New Repo
                 </button>
                 <form action="/logout" method="POST" class="m-0">
                     <button type="submit" class="btn btn-sm btn-outline-secondary">Logout</button>
                 </form>
+                {{else}}
+                <form action="/auth" method="GET" class="m-0">
+                    <button type="submit" class="btn btn-sm btn-outline-secondary">Login/Sign Up</button>
+                </form>
+                {{end}}
             </div>
         </div>
     </div>
