@@ -18,18 +18,16 @@ func (m *RepoManager) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-
 	cookie, err := r.Cookie("session_token")
 	if err != nil {
 		log.Println("Dashboard Redirect: No cookie found") // Debug log
-		http.Redirect(w, r, "/register", http.StatusSeeOther)
+		http.Redirect(w, r, "/auth", http.StatusSeeOther)
 		return
 	}
-
 	username, err := m.Store.GetUserByToken(cookie.Value)
 	if err != nil {
 		log.Printf("Dashboard Redirect: Token %s not found in DB: %v", cookie.Value, err) // Debug log
-		http.Redirect(w, r, "/register", http.StatusSeeOther)
+		http.Redirect(w, r, "/auth", http.StatusSeeOther)
 		return
 	}
 	repos, err := m.ListRepos(username)

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"html/template"
 	"log"
 	"net"
 	"net/http"
@@ -20,9 +21,14 @@ func main() {
 		Store:   store,
 	}
 
-	// Web Routes
+	// Registration/Login Routers
 	http.HandleFunc("/register", store.HandleRegister)
 	http.HandleFunc("/login", store.HandleLogin)
+	http.HandleFunc("/auth", func(w http.ResponseWriter, r *http.Request) {
+		tmpl, _ := template.ParseFS(templateFiles, "templates/auth.tmpl")
+		tmpl.Execute(w, nil)
+	})
+	http.HandleFunc("/check-user", store.HandleCheckUser)
 	// Todo: http.HandleFunc("/logout", HandleLogout)
 	http.HandleFunc("/", mgr.HandleDashboard) // Todo: show repos/users
 	// Future: http.HandleFunc("/repo/", mgr.HandleRepoView)

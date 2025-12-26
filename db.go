@@ -3,45 +3,13 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 
 	_ "github.com/mattn/go-sqlite3"
 	"golang.org/x/crypto/ssh"
 )
-
-const schema = `
--- 1. Users table: Stores identity and web credentials
-CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
--- 2. Public Keys table: Maps SSH keys to users
--- Note: key_data stores the full "ssh-rsa AAA..." string
-CREATE TABLE IF NOT EXISTS public_keys (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    key_data TEXT NOT NULL,
-    label TEXT, -- e.g., "Work Laptop"
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-);
-
--- 3. Sessions table: Maps random tokens to users for Web UI auth
-CREATE TABLE IF NOT EXISTS sessions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    token TEXT UNIQUE NOT NULL,
-    user_id INTEGER NOT NULL,
-    expires_at DATETIME NOT NULL,
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-);
-
--- Optimization: Index the session tokens for fast lookups
-CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
--- Optimization: Index key_data for fast SSH authentication
-CREATE INDEX IF NOT EXISTS idx_public_keys_data ON public_keys(key_data);`
 
 type AuthStore struct {
 	db *sql.DB
@@ -60,12 +28,11 @@ func NewAuthStore(dbPath string) (*AuthStore, error) {
 		return nil, err
 	}
 
-	// 3. Execute the schema
-	if _, err := db.Exec(schema); err != nil {
-		return nil, fmt.Errorf("failed to initialize schema: %w", err)
-	}
-
-	return &AuthStore{db: db}, nil
+	_, err = db.Exec(`
+        CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, username TEXT UNIQUE, password_hash TEXT);
+        CREATE TABLE IF NOT EXISTS sessions (id INTEGER PRIMARY KEY, token TEXT UNIQUE, user_id INTEGER, expires_at DATETIME);
+    `)
+	return &AuthStore{db: db}, err
 }
 
 func (s *AuthStore) GetUserByKey(incomingKey ssh.PublicKey) (string, error) {
@@ -92,4 +59,21 @@ func (s *AuthStore) GetUserByKey(incomingKey ssh.PublicKey) (string, error) {
 	}
 
 	return username, nil
+}
+
+func (s *AuthStore) HandleCheckUser(w http.ResponseWriter, r *http.Request) {
+	username := r.URL.Query().Get("username")
+	var exists bool
+	err := s.db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE username=?)", username).Scan(&exists)
+	if err != nil {
+		http.Error(w, "DB Error", 500)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if exists {
+		fmt.Fprint(w, `{"exists": true}`)
+	} else {
+		fmt.Fprint(w, `{"exists": false}`)
+	}
 }

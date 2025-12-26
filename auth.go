@@ -51,6 +51,7 @@ func (s *AuthStore) GetUserByToken(token string) (string, error) {
 	return username, nil
 }
 
+// Use the pointer to AuthStore, but w is passed by interface
 func (s *AuthStore) setSessionCookie(w http.ResponseWriter, username string) {
 	token, err := s.CreateSession(username)
 	if err != nil {
@@ -61,15 +62,15 @@ func (s *AuthStore) setSessionCookie(w http.ResponseWriter, username string) {
 	cookie := &http.Cookie{
 		Name:     "session_token",
 		Value:    token,
-		Path:     "/",                  // MUST be "/" so the Dashboard can see it
-		HttpOnly: true,                 // Security best practice
-		Secure:   false,                // Set to true only if using HTTPS
-		MaxAge:   86400,                // 24 hours in seconds
-		SameSite: http.SameSiteLaxMode, // Helps with modern browser redirects
+		Path:     "/",
+		HttpOnly: true,
+		MaxAge:   86400,
+		SameSite: http.SameSiteLaxMode,
 	}
 
 	http.SetCookie(w, cookie)
-	log.Printf("Cookie set successfully for user: %s", username)
+	// Add this log to confirm the token being sent
+	log.Printf("DEBUG: Setting cookie for %s: %s", username, token)
 }
 
 func (s *AuthStore) RegisterUser(username, password string) error {
@@ -90,32 +91,35 @@ func (s *AuthStore) RegisterUser(username, password string) error {
 }
 
 func (s *AuthStore) HandleRegister(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodGet {
-		tmpl, _ := template.ParseFS(templateFiles, "templates/register.html")
-		tmpl.Execute(w, nil)
-		return
-	}
-
 	if r.Method == http.MethodPost {
 		username := r.FormValue("username")
-		password := r.FormValue("password")
+		pw := r.FormValue("password")
+		confirm := r.FormValue("confirm_password")
 
-		// 1. Attempt registration
-		err := s.RegisterUser(username, password)
-		if err != nil {
-			// If it fails (e.g., user already exists), tell the user and STOP
-			log.Printf("Registration error: %v", err)
-			http.Error(w, "User already exists", http.StatusConflict)
+		if pw != confirm {
+			http.Error(w, "Passwords do not match", http.StatusBadRequest)
 			return
 		}
 
-		// 2. Set the session cookie
+		err := s.RegisterUser(username, pw)
+		if err != nil {
+			log.Printf("REGISTRATION FAIL: %v", err)
+			http.Error(w, "Could not create user", 500)
+			return
+		}
+
+		// 2. Create session and SET THE COOKIE
+		// Make sure s.setSessionCookie actually calls http.SetCookie(w, ...)
 		s.setSessionCookie(w, username)
 
-		// 3. IMPORTANT: Redirect immediately to prevent a "Refresh" or "Double Click" from re-submitting
-		http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
-		return // Ensure we stop execution here
+		// 3. LOG to verify the cookie was at least attempted
+		log.Printf("Registration successful for %s, redirecting to dashboard", username)
+
+		// 4. Redirect
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
 	}
+	// ... render template for GET
 }
 
 func (s *AuthStore) VerifyUser(username, password string) (bool, error) {
