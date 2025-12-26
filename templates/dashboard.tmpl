@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{{ .Username }}'s Repositories</title>
+    <style>
+        body { font-family: sans-serif; padding: 50px; line-height: 1.6; }
+        .repo-card { border: 1px solid #ddd; padding: 15px; margin-bottom: 10px; border-radius: 5px; }
+        .repo-name { font-weight: bold; color: #0366d6; text-decoration: none; }
+    </style>
+</head>
+<body>
+    <h1>Welcome, {{ .Username }}</h1>
+    <hr>
+    <h3>Your Repositories</h3>
+    {{ range .Repos }}
+    <div class="repo-card">
+        <a class="repo-name" href="/{{ $.Username }}/{{ . }}">
+            {{ . }}
+        </a>
+    </div>
+    {{ else }}
+    <p>No repositories found. Start by creating a new one <a href="">here</a></p>
+    {{ end }}
+</body>
+</html>
