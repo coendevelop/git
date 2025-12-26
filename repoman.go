@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 )
 
 type FileInfo struct {
@@ -258,34 +259,34 @@ func (m *RepoManager) HandleRepoView(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, filepath.Join("/view", username, repoName), http.StatusSeeOther)
 }
 
-func (m *RepoManager) HandleRepoNavigation(w http.ResponseWriter, r *http.Request, username, repo, path string) {
+func (m *RepoManager) HandleRepoNavigation(w http.ResponseWriter, r *http.Request, username, repo, branchName, path string) {
 	repoPath := filepath.Join(m.BaseDir, username, repo+".git")
+	gitRepo, _ := git.PlainOpen(repoPath)
 
-	// 1. Open the repo
-	gitRepo, err := git.PlainOpen(repoPath)
-	if err != nil {
-		log.Printf("REDIRECT: Repo not found at %s", repoPath)
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-		return
+	// 1. Get all branches for the dropdown
+	branchIter, _ := gitRepo.Branches()
+	var branches []string
+	branchIter.ForEach(func(ref *plumbing.Reference) error {
+		branches = append(branches, ref.Name().Short())
+		return nil
+	})
+
+	// 2. Get the hash of the SELECTED branch
+	branchRef, _ := gitRepo.Reference(plumbing.NewBranchReferenceName(branchName), true)
+	// Fallback if branch doesn't exist
+	if branchRef == nil {
+		branchRef, _ = gitRepo.Head()
 	}
 
-	ref, err := gitRepo.Head()
-	if err != nil {
-		m.renderTemplate(w, "repo_empty.tmpl", map[string]interface{}{
-			"RepoName": repo,
-			"Owner":    username,
-		})
-		return
-	}
-
-	commit, _ := gitRepo.CommitObject(ref.Hash())
+	commit, _ := gitRepo.CommitObject(branchRef.Hash())
 	tree, _ := commit.Tree()
 
-	// 2. Initialize the base data map (Crucial: use 'Owner' to match your breadcrumbs)
 	data := map[string]interface{}{
-		"RepoName":    repo,
-		"Owner":       username,
-		"CurrentPath": path,
+		"Owner":         username,
+		"RepoName":      repo,
+		"CurrentBranch": branchName,
+		"Branches":      branches,
+		"CurrentPath":   path,
 		"LastCommit": map[string]interface{}{
 			"Message": commit.Message,
 			"Author":  commit.Author.Name,
@@ -325,28 +326,30 @@ func (m *RepoManager) HandleRepoNavigation(w http.ResponseWriter, r *http.Reques
 	}
 }
 func (m *RepoManager) HandleView(w http.ResponseWriter, r *http.Request) {
-	// Strip /view/ and split
 	pathStr := strings.TrimPrefix(r.URL.Path, "/view/")
 	pathStr = strings.Trim(pathStr, "/")
 	parts := strings.Split(pathStr, "/")
 
-	// If this log doesn't print, the issue is your Router/Mux
-	// not sending the request to this function at all.
-	log.Printf("DEBUG: Accessing Path: %s | Parts: %v", r.URL.Path, parts)
-
 	if len(parts) < 2 {
-		log.Printf("DEBUG: Redirecting because len(parts) is %d", len(parts))
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
 
-	owner := parts[0]
+	username := parts[0]
 	repoName := parts[1]
 
+	// Default branch to main/master if not specified
+	branch := "main"
 	internalPath := ""
+
+	// If URL is /view/michael/nice/develop/src/main.go
+	// parts[2] is the branch "develop"
 	if len(parts) > 2 {
-		internalPath = strings.Join(parts[2:], "/")
+		branch = parts[2]
+	}
+	if len(parts) > 3 {
+		internalPath = strings.Join(parts[3:], "/")
 	}
 
-	m.HandleRepoNavigation(w, r, owner, repoName, internalPath)
+	m.HandleRepoNavigation(w, r, username, repoName, branch, internalPath)
 }

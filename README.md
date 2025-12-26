@@ -63,6 +63,8 @@ When pushing to the server, use the following URL format to account for the cust
    └── git.go              # Application entry point
    ```
 
+
+
 ## 📜 License
 
 This project is licensed under the **GNU GPLv3**. See the [LICENSE](LICENSE) file for details.
