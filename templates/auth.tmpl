@@ -1,20 +1,81 @@
 {{template "base/header.tmpl" .}}
-    <div class="box">
-        <h2 id="title">Welcome to Git@CoenDevelop</h2>
-        <form id="authForm" method="POST" action="/login">
-            <input type="text" id="username" name="username" placeholder="Username" required>
-            
-            <div id="passwordSection" class="hidden">
-                <input type="password" id="password" name="password" placeholder="Password" required>
-                
-                <div id="registerFields" class="hidden">
-                    <input type="password" id="confirmPassword" name="confirm_password" placeholder="Confirm Password">
+<style>
+    .hidden { display: none !important; }
+    .animate-fade-in { animation: fadeIn 0.3s ease-in; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+    body { background-color: #f8f9fa; }
+</style>
+<div class="container d-flex justify-content-center align-items-center vh-100">
+    <div class="card shadow-sm border-0" style="width: 100%; max-width: 400px;">
+        <div class="card-body p-5">
+            <div class="text-center mb-4">
+                <h2 class="h4 fw-bold" id="title">Welcome to Git@CoenDevelop</h2>
+                <p class="text-muted small">Sign in or create an account</p>
+            </div>
+
+            <form id="authForm" method="POST" action="/login">
+                <div class="mb-3">
+                    <label for="username" class="form-label small fw-semibold text-uppercase">Username</label>
+                    <input type="text" class="form-control" id="username" name="username" placeholder="Enter username" required>
                 </div>
                 
-                <button type="submit" id="submitBtn">Continue</button>
-            </div>
-            
-            <button type="button" id="nextBtn">Next</button>
-        </form>
+                <div id="passwordSection" class="hidden animate-fade-in">
+                    <div class="mb-3">
+                        <label for="password" class="form-label small fw-semibold text-uppercase">Password</label>
+                        <input type="password" class="form-control" id="password" name="password" placeholder="••••••••" required>
+                    </div>
+                    
+                    <div id="registerFields" class="hidden mb-3">
+                        <label for="confirmPassword" class="form-label small fw-semibold text-uppercase">Confirm Password</label>
+                        <input type="password" class="form-control" id="confirmPassword" name="confirm_password" placeholder="••••••••">
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary w-100 py-2 fw-bold" id="submitBtn">Continue</button>
+                </div>
+                
+                <button type="button" class="btn btn-primary w-100 py-2 fw-bold" id="nextBtn">Next</button>
+            </form>
+        </div>
     </div>
+</div>
+<script>
+    const nextBtn = document.getElementById('nextBtn');
+    const submitBtn = document.getElementById('submitBtn');
+    const passwordSection = document.getElementById('passwordSection');
+    const registerFields = document.getElementById('registerFields');
+    const title = document.getElementById('title');
+    const usernameInput = document.getElementById('username');
+    const authForm = document.getElementById('authForm');
+
+    nextBtn.addEventListener('click', async () => {
+        const username = usernameInput.value;
+        if (!username) {
+            usernameInput.classList.add('is-invalid');
+            return;
+        }
+        usernameInput.classList.remove('is-invalid');
+
+        try {
+            // Check if user exists to toggle between Login and Register
+            const response = await fetch(`/check-user?username=${encodeURIComponent(username)}`);
+            const data = await response.json();
+
+            // UI Transitions
+            nextBtn.classList.add('hidden');
+            passwordSection.classList.remove('hidden');
+
+            if (data.exists) {
+                title.innerText = "Welcome back";
+                authForm.action = "/login";
+                registerFields.classList.add('hidden');
+            } else {
+                title.innerText = "Create your account";
+                authForm.action = "/register";
+                registerFields.classList.remove('hidden');
+            }
+        } catch (err) {
+            console.error("Auth check failed", err);
+        }
+    });
+</script>
 {{template "base/footer.tmpl" .}}

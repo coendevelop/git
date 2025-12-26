@@ -1,0 +1,47 @@
+<nav class="navbar navbar-expand-lg navbar-light bg-white border-bottom sticky-top shadow-sm mb-5">
+    <div class="container">
+        <a class="navbar-brand fw-bold text-primary" href="/">
+            <span class="me-2">Git@</span>CoenDevelop
+        </a>
+
+        <div class="d-flex align-items-center ms-auto">
+            <span class="navbar-text me-3 d-none d-md-inline">
+                Welcome, <strong>{{ .Username }}</strong>
+            </span>
+            
+            <div class="d-flex gap-2">
+                <button type="button" class="btn btn-sm btn-primary px-3 shadow-sm" data-bs-toggle="modal" data-bs-target="#createRepoModal">
+                    <strong>+</strong> New Repo
+                </button>
+                <form action="/logout" method="POST" class="m-0">
+                    <button type="submit" class="btn btn-sm btn-outline-secondary">Logout</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</nav>
+<div class="modal fade" id="createRepoModal" tabindex="-1" aria-labelledby="createRepoModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content border-0 shadow">
+      <div class="modal-header border-bottom-0">
+        <h5 class="modal-title fw-bold" id="createRepoModalLabel">Create New Repository</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form action="/create-repo" method="POST">
+        <div class="modal-body py-4">
+          <div class="mb-3">
+            <label for="repoName" class="form-label small fw-semibold text-uppercase">Repository Name</label>
+            <input type="text" class="form-control form-control-lg" id="repoName" name="name" placeholder="my-awesome-project" required pattern="^[a-zA-Z0-9-_]+$">
+            <div class="form-text mt-2">
+              Use only letters, numbers, dashes, and underscores.
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer border-top-0 px-4 pb-4">
+          <button type="button" class="btn btn-outline-secondary px-4" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary px-4 fw-bold">Create Repository</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>

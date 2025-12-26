@@ -1,13 +1,49 @@
 {{template "base/header.tmpl" .}}
-    <h1>Welcome, {{ .Username }}</h1>
-    <button id="logout-btn" action="/logout" method="POST">Logout</button>
-    <hr>
-    <h2>Your Repositories</h2>
-    <ul>
+<style>
+    .hover-shadow:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 .5rem 1rem rgba(0,0,0,.15)!important;
+        transition: all 0.2s ease-in-out;
+    }
+    .card-title a {
+        color: #0d6efd;
+        font-weight: 600;
+    }
+    body {
+        background-color: #fcfcfc;
+    }
+</style>
+{{template "base/navbar.tmpl" .}}
+<div class="container py-5">
+
+    <div class="row g-4">
         {{range .Repos}}
-            <li><a href="/view/{{.}}">{{.}}</a></li>
+        <div class="col-12 col-md-6 col-lg-4">
+            <div class="card h-100 border-0 shadow-sm hover-card">
+                <div class="card-body p-4">
+                    <div class="d-flex align-items-center mb-3">
+                        <div class="bg-primary bg-opacity-10 p-2 rounded-3 me-3">
+                            <span class="fs-4">📦</span>
+                        </div>
+                        <h5 class="card-title mb-0">
+                            <a href="/view/{{$.Username}}/{{.}}" class="text-decoration-none text-dark stretched-link">{{.}}</a>
+                        </h5>
+                    </div>
+                    <p class="text-muted small">Standard bare git repository</p>
+                </div>
+                <div class="card-footer bg-white border-0 pb-4 px-4">
+                    <span class="badge rounded-pill bg-light text-dark border">main</span>
+                </div>
+            </div>
+        </div>
         {{else}}
-            <li>No repositories found. Create your first one!</li>
+        <div class="col-12 text-center py-5">
+            <div class="bg-light rounded-5 p-5">
+                <h3 class="text-muted">No repositories found</h3>
+                <p>Start by creating your first project on the server.</p>
+            </div>
+        </div>
         {{end}}
-    </ul>
-{{template "base/footer.tmpl".}}
+    </div>
+</div>
+{{template "base/footer.tmpl" .}}

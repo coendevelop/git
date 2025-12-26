@@ -1,0 +1,48 @@
+{{template "base/header.tmpl" .}}
+{{template "base/navbar.tmpl" .}}
+<style>
+    code {
+        font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace !important;
+        white-space: pre-wrap;
+        word-break: break-all;
+    }
+    .card-body pre {
+        background-color: #fafafa !important;
+    }
+</style>
+<div class="container py-4">
+    <nav aria-label="breadcrumb" class="mb-4">
+        <ol class="breadcrumb bg-white p-3 rounded shadow-sm border">
+            <li class="breadcrumb-item"><a href="/" class="text-decoration-none">Dashboard</a></li>
+            <li class="breadcrumb-item"><a href="/view/{{.RepoName}}" class="text-decoration-none">{{.RepoName}}</a></li>
+            <li class="breadcrumb-item active" aria-current="page">{{.FileName}}</li>
+        </ol>
+    </nav>
+
+    <div class="card shadow-sm border-0">
+        <div class="card-header bg-light py-3 d-flex justify-content-between align-items-center border-bottom">
+            <div class="d-flex align-items-center">
+                <span class="me-2 text-primary">📄</span>
+                <h6 class="mb-0 fw-bold text-dark">{{.FileName}}</h6>
+            </div>
+            <button class="btn btn-sm btn-outline-primary" onclick="copyCode()">
+                Copy Code
+            </button>
+        </div>
+        <div class="card-body p-0">
+            <textarea id="codeSource" class="d-none">{{.Content}}</textarea>
+            <pre class="m-0 p-4 bg-white" style="overflow-x: auto;"><code class="font-monospace text-dark" style="font-size: 0.9rem; line-height: 1.5;">{{.Content}}</code></pre>
+        </div>
+    </div>
+</div>
+
+<script>
+function copyCode() {
+    const code = document.getElementById('codeSource').value;
+    navigator.clipboard.writeText(code).then(() => {
+        alert('Code copied to clipboard!');
+    });
+}
+</script>
+
+{{template "base/footer.tmpl" .}}

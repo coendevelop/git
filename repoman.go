@@ -96,25 +96,42 @@ func (m *RepoManager) getAuthenticatedUser(r *http.Request) (string, error) {
 	return m.Store.GetUserByToken(cookie.Value)
 }
 
-// TODO: Add repo to database
-func (m *RepoManager) CreateRepo(username, repoName string) error {
-	// Sanitize inputs to prevent directory traversal attacks
-	username = filepath.Clean(username)
-	repoName = filepath.Clean(repoName)
-
-	// Build path: storage/username/reponame.git
-	repoPath := filepath.Join(m.BaseDir, username, repoName+".git")
-
-	// 1. Create the user's directory if it doesn't exist
-	if err := os.MkdirAll(repoPath, 0755); err != nil {
-		return fmt.Errorf("failed to create directory: %w", err)
+func (m *RepoManager) HandleCreateRepo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
 	}
 
-	// 2. Initialize bare repository
-	cmd := exec.Command("git", "init", "--bare")
-	cmd.Dir = repoPath
+	// 1. Get user context
+	username, err := m.Store.GetUserByTokenFromRequest(r)
+	if err != nil {
+		http.Redirect(w, r, "/auth", http.StatusSeeOther)
+		return
+	}
 
-	return cmd.Run()
+	// 2. Get repo name from form
+	repoName := r.FormValue("name")
+	if repoName == "" {
+		http.Error(w, "Repository name is required", http.StatusBadRequest)
+		return
+	}
+
+	// 3. Construct path: ./data/repos/username/repoName.git
+	repoPath := filepath.Join(m.BaseDir, username, repoName+".git")
+
+	// 4. Execute git init --bare
+	// Ensure the parent directory exists first
+	os.MkdirAll(filepath.Dir(repoPath), 0755)
+
+	cmd := exec.Command("git", "init", "--bare", repoPath)
+	if err := cmd.Run(); err != nil {
+		log.Printf("Failed to init repo %s: %v", repoPath, err)
+		http.Error(w, "Failed to create repository", http.StatusInternalServerError)
+		return
+	}
+
+	targetURL := fmt.Sprintf("/view/%s/%s", username, repoName)
+	http.Redirect(w, r, targetURL, http.StatusSeeOther)
 }
 
 // TODO: Add check for loggeduser = reponame
@@ -137,6 +154,9 @@ func (m *RepoManager) DeleteRepo(username, repoName string) error {
 
 func (m *RepoManager) ListUserRepos(username string) ([]string, error) {
 	userDir := filepath.Join(m.BaseDir, username)
+
+	// DEBUG: Copy this path from your terminal and check it in your file explorer
+	log.Printf("DEBUG: Looking for repos in: %s", userDir)
 
 	// Create the directory if it doesn't exist yet
 	if _, err := os.Stat(userDir); os.IsNotExist(err) {
@@ -240,29 +260,47 @@ func (m *RepoManager) HandleRepoView(w http.ResponseWriter, r *http.Request) {
 
 func (m *RepoManager) HandleRepoNavigation(w http.ResponseWriter, r *http.Request, username, repo, path string) {
 	repoPath := filepath.Join(m.BaseDir, username, repo+".git")
+
+	// 1. Open the repo
 	gitRepo, err := git.PlainOpen(repoPath)
 	if err != nil {
-		m.renderTemplate(w, "repo_view.tmpl", map[string]interface{}{
+		log.Printf("Error opening repo: %v", err)
+		http.Error(w, "Repository not found", 404)
+		return
+	}
+
+	// 2. Check for HEAD (Handle Empty Repos)
+	ref, err := gitRepo.Head()
+	if err != nil {
+		// If HEAD is missing, it's likely an empty (newly init) repo
+		m.renderTemplate(w, "repo_empty.tmpl", map[string]interface{}{
 			"RepoName": repo,
 			"Username": username,
+			"SSHAddr":  r.Host,
 		})
 		return
 	}
 
-	ref, _ := gitRepo.Head()
+	// 3. Get the tree from the latest commit
 	commit, _ := gitRepo.CommitObject(ref.Hash())
 	tree, _ := commit.Tree()
+	data := map[string]interface{}{
+		"RepoName":    repo,
+		"Files":       tree.Entries, // or subTree.Entries
+		"Username":    username,
+		"CurrentPath": path,
+		// Add the new commit details here
+		"LastCommit": map[string]interface{}{
+			"Message": commit.Message,
+			"Author":  commit.Author.Name,
+			"Date":    commit.Author.When.Format("Jan 02, 2006"),
+		},
+	}
 
+	// 4. Handle Root vs Subpath
 	if path == "" {
-		// Show Root Directory
-		entries := tree.Entries
-		m.renderTemplate(w, "templates/repo_view.tmpl", map[string]interface{}{
-			"RepoName": repo,
-			"Files":    entries,
-			"Username": username,
-		})
+		m.renderTemplate(w, "repo_view.tmpl", data)
 	} else {
-		// Look up the specific path (could be a file or a sub-folder)
 		entry, err := tree.FindEntry(path)
 		if err != nil {
 			http.Error(w, "File not found", 404)
@@ -270,7 +308,6 @@ func (m *RepoManager) HandleRepoNavigation(w http.ResponseWriter, r *http.Reques
 		}
 
 		if entry.Mode.IsFile() {
-			// It's a file! Get the content (Blob)
 			file, _ := tree.File(path)
 			content, _ := file.Contents()
 			m.renderTemplate(w, "file_view.tmpl", map[string]interface{}{
@@ -280,9 +317,8 @@ func (m *RepoManager) HandleRepoNavigation(w http.ResponseWriter, r *http.Reques
 				"Username": username,
 			})
 		} else {
-			// It's a subdirectory!
 			subTree, _ := tree.Tree(path)
-			m.renderTemplate(w, "templates/repo_view.tmpl", map[string]interface{}{
+			m.renderTemplate(w, "repo_view.tmpl", map[string]interface{}{
 				"RepoName":    repo,
 				"Files":       subTree.Entries,
 				"Username":    username,
@@ -290,4 +326,29 @@ func (m *RepoManager) HandleRepoNavigation(w http.ResponseWriter, r *http.Reques
 			})
 		}
 	}
+}
+
+func (m *RepoManager) HandleView(w http.ResponseWriter, r *http.Request) {
+	pathStr := strings.TrimPrefix(r.URL.Path, "/view/")
+	pathStr = strings.Trim(pathStr, "/")
+
+	parts := strings.Split(pathStr, "/")
+
+	if len(parts) < 2 {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+
+	username := parts[0]
+	repoName := parts[1] // This is "nice"
+
+	// Everything after index 1 is the internal path
+	// If URL is /view/michael/nice/public/js, internalPath is "public/js"
+	internalPath := ""
+	if len(parts) > 2 {
+		internalPath = strings.Join(parts[2:], "/")
+	}
+
+	// This opens data/repos/michael/nice.git
+	m.HandleRepoNavigation(w, r, username, repoName, internalPath)
 }
