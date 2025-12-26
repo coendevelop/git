@@ -21,7 +21,7 @@ func main() {
 		Store:   store,
 	}
 
-	// Registration/Login Routers
+	// Registration/Login/Auth routing
 	http.HandleFunc("/register", store.HandleRegister)
 	http.HandleFunc("/login", store.HandleLogin)
 	http.HandleFunc("/auth", func(w http.ResponseWriter, r *http.Request) {
@@ -30,6 +30,8 @@ func main() {
 	})
 	http.HandleFunc("/check-user", store.HandleCheckUser)
 	http.HandleFunc("/logout", store.HandleLogout)
+
+	// Dashboard routing
 	http.HandleFunc("/", mgr.HandleDashboard) // Todo: show repos/users
 	// Future: http.HandleFunc("/repo/", mgr.HandleRepoView)
 

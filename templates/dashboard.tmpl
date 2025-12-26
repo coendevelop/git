@@ -10,11 +10,12 @@
 </head>
 <body>
     <h1>Welcome, {{ .Username }}</h1>
+    <button action="/logout">Logout</button>
     <hr>
     <h3>Your Repositories</h3>
     {{ range .Repos }}
     <div class="repo-card">
-        <a class="repo-name" href="/{{ $.Username }}/{{ . }}">
+        <a class="repo-name" href="/view/{{ $.Username }}/{{ $.repoName }}">
             {{ . }}
         </a>
     </div>

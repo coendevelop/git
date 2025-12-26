@@ -64,6 +64,14 @@ func (s *AuthStore) GetUserByToken(token string) (string, error) {
 	return username, nil
 }
 
+func (s *AuthStore) GetUserByTokenFromRequest(r *http.Request) (string, error) {
+	cookie, err := r.Cookie("session_token")
+	if err != nil {
+		return "", err
+	}
+	return s.GetUserByToken(cookie.Value)
+}
+
 // Use the pointer to AuthStore, but w is passed by interface
 func (s *AuthStore) setSessionCookie(w http.ResponseWriter, username string) {
 	token, err := s.CreateSession(username)

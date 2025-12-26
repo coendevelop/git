@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Quick Setup - {{.RepoName}}</title>
+    <style>
+        body { font-family: -apple-system, sans-serif; line-height: 1.6; padding: 40px; background: #f6f8fa; color: #24292e; }
+        .container { max-width: 800px; margin: 0 auto; background: white; border: 1px solid #e1e4e8; border-radius: 6px; padding: 32px; }
+        h1 { border-bottom: 1px solid #eaecef; padding-bottom: 10px; }
+        code { background: #f3f3f3; padding: 4px 6px; border-radius: 3px; font-family: monospace; }
+        pre { background: #f6f8fa; padding: 16px; border-radius: 6px; overflow: auto; border: 1px solid #ddd; }
+        .setup-section { margin-top: 24px; }
+        .back-link { text-decoration: none; color: #0366d6; font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/dashboard" class="back-link">← Back to Dashboard</a>
+        <h1>Quick setup — if you’ve done this kind of thing before</h1>
+        
+        <div class="setup-section">
+            <p><strong>Create a new repository on the command line</strong></p>
+            <pre>
+echo "# {{.RepoName}}" >> README.md
+git init
+git add README.md
+git commit -m "first commit"
+git branch -M main
+git remote add origin ssh://git@yourdomain.com:{{.SSHPort}}/{{.Username}}/{{.RepoName}}.git
+git push -u origin main</pre>
+        </div>
+
+        <div class="setup-section">
+            <p><strong>…or push an existing repository from the command line</strong></p>
+            <pre>
+git remote add origin ssh://git@yourdomain.com:{{.SSHPort}}/{{.Username}}/{{.RepoName}}.git
+git branch -M main
+git push -u origin main</pre>
+        </div>
+    </div>
+</body>
+</html>
