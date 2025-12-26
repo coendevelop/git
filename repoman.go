@@ -405,37 +405,71 @@ func (m *RepoManager) HandleView(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *RepoManager) HandleDownloadZip(w http.ResponseWriter, r *http.Request) {
-	// Assuming URL format: /download/{owner}/{repo}/{branch}
-	pathStr := strings.TrimPrefix(r.URL.Path, "/download/")
-	parts := strings.Split(strings.Trim(pathStr, "/"), "/")
+	// 1. Get the path after /download/
+	pathStr := strings.TrimPrefix(r.URL.Path, "/download/view/")
+	pathStr = strings.Trim(pathStr, "/")
+	parts := strings.Split(pathStr, "/")
+
+	// Adjusted check: If URL is /download/username/repo/branch, we need 3 parts.
 	if len(parts) < 3 {
-		http.Error(w, "Invalid request", 400)
+		log.Printf("DOWNLOAD ERROR: Path too short: %v", parts)
+		http.Error(w, "Invalid download path", 400)
 		return
 	}
 
-	username, repo, branchName := parts[0], parts[1], parts[2]
-	repoPath := filepath.Join(m.BaseDir, username, repo+".git")
-	gitRepo, _ := git.PlainOpen(repoPath)
+	username := parts[0]
+	repo := parts[1]
+	branchName := parts[2]
 
-	// Get the tree for the specific branch
-	branchRef, _ := gitRepo.Reference(plumbing.NewBranchReferenceName(branchName), true)
-	commit, _ := gitRepo.CommitObject(branchRef.Hash())
-	tree, _ := commit.Tree()
+	// FIX: Multi-tiered lookup to find the repo on disk
+	possiblePaths := []string{
+		filepath.Join(m.BaseDir, username, repo+".git"), // Bare repo
+		filepath.Join(m.BaseDir, username, repo),        // Non-bare repo
+	}
 
-	// Set headers to trigger a download
+	var gitRepo *git.Repository
+	var openErr error
+	for _, p := range possiblePaths {
+		gitRepo, openErr = git.PlainOpen(p)
+		if openErr == nil {
+			break
+		}
+	}
+
+	if openErr != nil {
+		log.Printf("ERROR: Repo not found at any of: %v", possiblePaths)
+		http.Error(w, "Repository not found on server", 404)
+		return
+	}
+
+	// 2. Resolve the branch reference
+	branchRef, err := gitRepo.Reference(plumbing.NewBranchReferenceName(branchName), true)
+	if err != nil {
+		branchRef, _ = gitRepo.Head()
+	}
+
+	if branchRef == nil {
+		http.Error(w, "Branch not found", 404)
+		return
+	}
+
+	// 3. Prepare Zip Headers
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s-%s.zip", repo, branchName))
 
 	zw := zip.NewWriter(w)
-	defer zw.Close()
-
-	// Walk the git tree and add files to zip
-	tree.Files().ForEach(func(f *object.File) error {
-		header := &zip.FileHeader{
-			Name:   f.Name,
-			Method: zip.Deflate,
+	defer func() {
+		if err := zw.Close(); err != nil {
+			log.Printf("Error closing zip writer: %v", err)
 		}
-		writer, err := zw.CreateHeader(header)
+	}()
+
+	// 4. Get the tree and stream files
+	commit, _ := gitRepo.CommitObject(branchRef.Hash())
+	tree, _ := commit.Tree()
+
+	err = tree.Files().ForEach(func(f *object.File) error {
+		writer, err := zw.Create(f.Name)
 		if err != nil {
 			return err
 		}
@@ -449,4 +483,8 @@ func (m *RepoManager) HandleDownloadZip(w http.ResponseWriter, r *http.Request) 
 		_, err = io.Copy(writer, reader)
 		return err
 	})
+
+	if err != nil {
+		log.Printf("Error during zip generation: %v", err)
+	}
 }
