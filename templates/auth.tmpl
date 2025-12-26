@@ -1,15 +1,4 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Git@CoenDevelop - Access</title>
-    <style>
-        .hidden { display: none; }
-        .box { border: 1px solid #ccc; padding: 20px; width: 300px; margin: 50px auto; border-radius: 8px; }
-        input { width: 100%; margin: 10px 0; padding: 8px; box-sizing: border-box; }
-        button { width: 100%; padding: 10px; background: #0366d6; color: white; border: none; cursor: pointer; }
-    </style>
-</head>
-<body>
+{{template "templates/header.tmpl" .}}
     <div class="box">
         <h2 id="title">Welcome to Git@CoenDevelop</h2>
         <form id="authForm" method="POST" action="/login">
@@ -28,42 +17,4 @@
             <button type="button" id="nextBtn">Next</button>
         </form>
     </div>
-
-    <script>
-        const usernameInput = document.getElementById('username');
-        const nextBtn = document.getElementById('nextBtn');
-        const passwordSection = document.getElementById('passwordSection');
-        const registerFields = document.getElementById('registerFields');
-        const authForm = document.getElementById('authForm');
-        const title = document.getElementById('title');
-
-        nextBtn.onclick = async () => {
-            const user = usernameInput.value;
-            if(!user) return;
-
-            const res = await fetch(`/check-user?username=${user}`);
-            const data = await res.json();
-
-            passwordSection.classList.remove('hidden');
-            nextBtn.classList.add('hidden');
-
-            if (data.exists) {
-                title.innerText = "Log In";
-                authForm.action = "/login";
-            } else {
-                title.innerText = "Create Account";
-                authForm.action = "/register";
-                registerFields.classList.remove('hidden');
-                document.getElementById('confirmPassword').required = true;
-            }
-        };
-
-        authForm.onsubmit = () => {
-            // Disable the button and change text so the user knows it's working
-            const btn = document.getElementById('submitBtn');
-            btn.disabled = true;
-            btn.innerText = "Creating Account...";
-        };
-    </script>
-</body>
-</html>
+{{template "templates/footer.tmpl" .}}

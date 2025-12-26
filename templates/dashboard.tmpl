@@ -10,7 +10,7 @@
 </head>
 <body>
     <h1>Welcome, {{ .Username }}</h1>
-    <button action="/logout">Logout</button>
+    <button id="logout-btn" action="/logout" method="POST">Logout</button>
     <hr>
     <h3>Your Repositories</h3>
     {{ range .Repos }}
