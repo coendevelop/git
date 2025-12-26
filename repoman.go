@@ -34,18 +34,20 @@ func NewRepoManager(baseDir string, store *AuthStore) (*RepoManager, error) {
 	}
 
 	// Pre-parse all templates in the folder
-	tmplFiles, err := filepath.Glob("templates/*.tmpl")
+	files, err := filepath.Glob("templates/*.tmpl")
 	if err != nil {
 		return nil, err
 	}
 
-	for _, file := range tmplFiles {
+	for _, file := range files {
+		// filepath.Base("templates/repo_view.tmpl") becomes "repo_view.tmpl"
 		name := filepath.Base(file)
-		t, err := template.ParseFiles(file)
+		tmpl, err := template.ParseFiles(file)
 		if err != nil {
-			return nil, fmt.Errorf("error parsing template %s: %v", name, err)
+			return nil, err
 		}
-		mgr.templateCache[name] = t
+		mgr.templateCache[name] = tmpl
+		log.Printf("Loaded template: %s", name) // Debug to see exactly what's in cache
 	}
 
 	return mgr, nil
@@ -200,7 +202,7 @@ func (m *RepoManager) HandleRepoView(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// If the repo is empty (no commits), show a specific message
 		if err.Error() == "reference not found" {
-			m.renderTemplate(w, "repo_empty.tmpl", map[string]interface{}{
+			m.renderTemplate(w, "templates/repo_view.tmpl", map[string]interface{}{
 				"Username": username,
 				"RepoName": repoName,
 				"SSHPort":  "2222",
@@ -213,7 +215,7 @@ func (m *RepoManager) HandleRepoView(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 4. Render the file list
-	m.renderTemplate(w, "repo_view.tmpl", map[string]interface{}{
+	m.renderTemplate(w, "templates/repo_view.tmpl", map[string]interface{}{
 		"Username": username,
 		"RepoName": repoName,
 		"Files":    files,
@@ -225,7 +227,7 @@ func (m *RepoManager) HandleRepoNavigation(w http.ResponseWriter, r *http.Reques
 	repoPath := filepath.Join(m.BaseDir, username, repo+".git")
 	gitRepo, err := git.PlainOpen(repoPath)
 	if err != nil {
-		m.renderTemplate(w, "repo_empty.html", map[string]interface{}{
+		m.renderTemplate(w, "templates/repo_view.tmpl", map[string]interface{}{
 			"RepoName": repo,
 			"Username": username,
 		})
@@ -239,7 +241,7 @@ func (m *RepoManager) HandleRepoNavigation(w http.ResponseWriter, r *http.Reques
 	if path == "" {
 		// Show Root Directory
 		entries := tree.Entries
-		m.renderTemplate(w, "repo_view.html", map[string]interface{}{
+		m.renderTemplate(w, "templates/repo_view.tmpl", map[string]interface{}{
 			"RepoName": repo,
 			"Files":    entries,
 			"Username": username,
@@ -256,7 +258,7 @@ func (m *RepoManager) HandleRepoNavigation(w http.ResponseWriter, r *http.Reques
 			// It's a file! Get the content (Blob)
 			file, _ := tree.File(path)
 			content, _ := file.Contents()
-			m.renderTemplate(w, "file_view.html", map[string]interface{}{
+			m.renderTemplate(w, "file_view.tmpl", map[string]interface{}{
 				"RepoName": repo,
 				"FileName": entry.Name,
 				"Content":  content,
@@ -265,7 +267,7 @@ func (m *RepoManager) HandleRepoNavigation(w http.ResponseWriter, r *http.Reques
 		} else {
 			// It's a subdirectory!
 			subTree, _ := tree.Tree(path)
-			m.renderTemplate(w, "repo_view.html", map[string]interface{}{
+			m.renderTemplate(w, "templates/repo_view.tmpl", map[string]interface{}{
 				"RepoName":    repo,
 				"Files":       subTree.Entries,
 				"Username":    username,

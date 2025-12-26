@@ -60,7 +60,13 @@ func main() {
 	})
 
 	// Start Servers
-	fmt.Println("Git.CoenDevelop.org")
+	go func() {
+		log.Println("Web UI starting...")
+		if err := http.ListenAndServe(":8080", nil); err != nil {
+			log.Fatalf("Web server failed: %v", err)
+		}
+	}()
+	fmt.Println("Git@CoenDevelop")
 	fmt.Println("This software is licensed with the GNU-GPLv3.")
 	fmt.Println("For more information, see http://git.coendevelop.org/license")
 	fmt.Println("Web UI: http://localhost:8080")
