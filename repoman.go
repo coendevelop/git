@@ -220,3 +220,57 @@ func (m *RepoManager) HandleRepoView(w http.ResponseWriter, r *http.Request) {
 	})
 	http.Redirect(w, r, filepath.Join("/view", username, repoName), http.StatusSeeOther)
 }
+
+func (m *RepoManager) HandleRepoNavigation(w http.ResponseWriter, r *http.Request, username, repo, path string) {
+	repoPath := filepath.Join(m.BaseDir, username, repo+".git")
+	gitRepo, err := git.PlainOpen(repoPath)
+	if err != nil {
+		m.renderTemplate(w, "repo_empty.html", map[string]interface{}{
+			"RepoName": repo,
+			"Username": username,
+		})
+		return
+	}
+
+	ref, _ := gitRepo.Head()
+	commit, _ := gitRepo.CommitObject(ref.Hash())
+	tree, _ := commit.Tree()
+
+	if path == "" {
+		// Show Root Directory
+		entries := tree.Entries
+		m.renderTemplate(w, "repo_view.html", map[string]interface{}{
+			"RepoName": repo,
+			"Files":    entries,
+			"Username": username,
+		})
+	} else {
+		// Look up the specific path (could be a file or a sub-folder)
+		entry, err := tree.FindEntry(path)
+		if err != nil {
+			http.Error(w, "File not found", 404)
+			return
+		}
+
+		if entry.Mode.IsFile() {
+			// It's a file! Get the content (Blob)
+			file, _ := tree.File(path)
+			content, _ := file.Contents()
+			m.renderTemplate(w, "file_view.html", map[string]interface{}{
+				"RepoName": repo,
+				"FileName": entry.Name,
+				"Content":  content,
+				"Username": username,
+			})
+		} else {
+			// It's a subdirectory!
+			subTree, _ := tree.Tree(path)
+			m.renderTemplate(w, "repo_view.html", map[string]interface{}{
+				"RepoName":    repo,
+				"Files":       subTree.Entries,
+				"Username":    username,
+				"CurrentPath": path,
+			})
+		}
+	}
+}

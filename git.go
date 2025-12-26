@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 )
 
 func main() {
@@ -33,7 +34,28 @@ func main() {
 
 	// Dashboard routing
 	http.HandleFunc("/", mgr.HandleDashboard) // Todo: show repos/users
-	// Future: http.HandleFunc("/repo/", mgr.HandleRepoView)
+	// Example URL: /view/my-project/subdir/main.go
+	http.HandleFunc("/view/", func(w http.ResponseWriter, r *http.Request) {
+		// 1. Get user context
+		username, err := mgr.Store.GetUserByTokenFromRequest(r)
+		if err != nil {
+			http.Redirect(w, r, "/auth", http.StatusSeeOther)
+			return
+		}
+
+		// 2. Split the path: /view/repoName/path/to/file
+		pathSegments := strings.Split(strings.TrimPrefix(r.URL.Path, "/view/"), "/")
+		if len(pathSegments) < 1 {
+			http.Error(w, "Invalid URL", 400)
+			return
+		}
+
+		repoName := pathSegments[0]
+		filePath := strings.Join(pathSegments[1:], "/") // will be empty if at root
+
+		// 3. Delegate to the handler
+		mgr.HandleRepoNavigation(w, r, username, repoName, filePath)
+	})
 
 	// Start Servers
 	go func() {
