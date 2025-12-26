@@ -17,6 +17,7 @@ A lightweight, self-hosted Git service built with **Go** and **Bootstrap 5**. Th
 * **Backend:** [Go (Golang)](https://golang.org/)
 * **Git Logic:** [go-git](https://github.com/go-git/go-git)
 * **Frontend:** HTML5, Bootstrap 5.3, JavaScript
+* **Database:** SQLite3
 * **Storage:** Local filesystem for bare repositories.
 
 ## 📋 Prerequisites
