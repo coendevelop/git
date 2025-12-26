@@ -16,10 +16,10 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Init Repo Manager with the Store dependency
-	mgr := &RepoManager{
-		BaseDir: "./data/repos",
-		Store:   store,
+	// 2. CORRECTED: Use the constructor to load templates
+	mgr, err := NewRepoManager("./data/repos", store)
+	if err != nil {
+		log.Fatalf("Failed to initialize Repo Manager: %v", err)
 	}
 
 	// License link
