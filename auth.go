@@ -230,3 +230,26 @@ func (s *AuthStore) HandleLogout(w http.ResponseWriter, r *http.Request) {
 	// 4. Redirect to the all-in-one auth page
 	http.Redirect(w, r, "/auth", http.StatusSeeOther)
 }
+func (m *RepoManager) GetUsernameFromSession(r *http.Request) string {
+	// 1. Extract the token from the cookie
+	cookie, err := r.Cookie("session_token")
+	if err != nil {
+		return "" // Not logged in
+	}
+
+	// 2. Query the DB to find the username associated with this token
+	var username string
+	query := `
+        SELECT u.username 
+        FROM users u
+        JOIN sessions s ON u.id = s.user_id
+        WHERE s.token = ? AND s.expires_at > CURRENT_TIMESTAMP`
+
+	err = m.Store.db.QueryRow(query, cookie.Value).Scan(&username)
+	if err != nil {
+		log.Printf("Session lookup failed: %v", err)
+		return ""
+	}
+
+	return username
+}

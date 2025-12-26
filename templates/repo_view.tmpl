@@ -70,10 +70,22 @@
                     {{end}}
                 </ul>
             </div>
-
-            <a href="/download/view/{{$.Owner}}/{{$.RepoName}}/{{$.CurrentBranch}}" class="btn btn-sm btn-primary shadow-sm d-flex align-items-center">
-                <span class="me-1">📦</span> Download ZIP
-            </a>
+            <style>
+                .download-badge {
+                    font-size: 0.75rem;
+                    background-color: var(--bs-body-tertiary-bg);
+                    border: 1px solid var(--bs-border-color);
+                    color: var(--bs-body-secondary-color);
+                }
+            </style>
+            <div class="d-flex align-items-center gap-2">
+                <a href="/download/view/{{$.Owner}}/{{$.RepoName}}/{{$.CurrentBranch}}" class="btn btn-sm btn-primary shadow-sm">
+                    📦 Download ZIP
+                </a>
+                <span class="badge download-badge rounded-pill px-2 py-1">
+                    {{.DownloadCount}} downloads
+                </span>
+            </div>
         </div>
         {{end}}
     </div>

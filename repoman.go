@@ -8,7 +8,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -100,42 +99,46 @@ func (m *RepoManager) getAuthenticatedUser(r *http.Request) (string, error) {
 	return m.Store.GetUserByToken(cookie.Value)
 }
 
+func (m *RepoManager) CreateNewRepository(username string, repoName string) error {
+	// 1. Create the repository on disk (Bare Repo)
+	repoPath := filepath.Join(m.BaseDir, username, repoName+".git")
+	_, err := git.PlainInit(repoPath, true)
+	if err != nil {
+		return fmt.Errorf("failed to init git repo: %v", err)
+	}
+
+	// 2. Insert metadata into SQLite
+	query := `
+        INSERT INTO repositories (user_id, name, description)
+        VALUES ((SELECT id FROM users WHERE username = ? COLLATE NOCASE), ?, ?)`
+
+	_, err = m.Store.db.Exec(query, username, repoName, "No description provided.")
+	if err != nil {
+		// If DB fails, you might want to cleanup the folder,
+		// but often we just log the error.
+		return fmt.Errorf("failed to save repo metadata: %v", err)
+	}
+
+	return nil
+}
+
 func (m *RepoManager) HandleCreateRepo(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		http.Error(w, "Method not allowed", 405)
 		return
 	}
 
-	// 1. Get user context
-	username, err := m.Store.GetUserByTokenFromRequest(r)
-	if err != nil {
-		http.Redirect(w, r, "/auth", http.StatusSeeOther)
-		return
-	}
-
-	// 2. Get repo name from form
+	// Get username from session (logic varies based on your auth)
+	username := m.GetUsernameFromSession(r)
 	repoName := r.FormValue("name")
-	if repoName == "" {
-		http.Error(w, "Repository name is required", http.StatusBadRequest)
+
+	err := m.CreateNewRepository(username, repoName)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
 		return
 	}
 
-	// 3. Construct path: ./data/repos/username/repoName.git
-	repoPath := filepath.Join(m.BaseDir, username, repoName+".git")
-
-	// 4. Execute git init --bare
-	// Ensure the parent directory exists first
-	os.MkdirAll(filepath.Dir(repoPath), 0755)
-
-	cmd := exec.Command("git", "init", "--bare", repoPath)
-	if err := cmd.Run(); err != nil {
-		log.Printf("Failed to init repo %s: %v", repoPath, err)
-		http.Error(w, "Failed to create repository", http.StatusInternalServerError)
-		return
-	}
-
-	targetURL := fmt.Sprintf("/view/%s/%s", username, repoName)
-	http.Redirect(w, r, targetURL, http.StatusSeeOther)
+	http.Redirect(w, r, "/view/"+username+"/"+repoName+"/main/", http.StatusSeeOther)
 }
 
 // TODO: Add check for loggeduser = reponame
@@ -310,6 +313,7 @@ func (m *RepoManager) HandleRepoNavigation(w http.ResponseWriter, r *http.Reques
 		"RepoName":      repo,
 		"CurrentBranch": branchName,
 		"Branches":      branches,
+		"DownloadCount": m.GetDownloadCount(username, repo), // Retrieve count here
 		"CurrentPath":   path,
 		"SSHAddr":       r.Host,
 		"LastCommit": map[string]interface{}{
@@ -487,4 +491,36 @@ func (m *RepoManager) HandleDownloadZip(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		log.Printf("Error during zip generation: %v", err)
 	}
+}
+func (m *RepoManager) IncrementDownloadCount(username, repoName string) error {
+	// We join with the users table to find the correct repo based on username
+	query := `
+        UPDATE repositories 
+        SET download_count = download_count + 1 
+        WHERE name = ? AND user_id = (SELECT id FROM users WHERE username = ? COLLATE NOCASE)`
+
+	result, err := m.Store.db.Exec(query, repoName, username)
+	if err != nil {
+		return err
+	}
+
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("no repository found for %s/%s", username, repoName)
+	}
+	return nil
+}
+
+func (m *RepoManager) GetDownloadCount(username, repoName string) int {
+	var count int
+	query := `
+        SELECT download_count 
+        FROM repositories 
+        WHERE name = ? AND user_id = (SELECT id FROM users WHERE username = ? COLLATE NOCASE)`
+
+	err := m.Store.db.QueryRow(query, repoName, username).Scan(&count)
+	if err != nil {
+		return 0 // Return 0 if not found or error occurs
+	}
+	return count
 }
