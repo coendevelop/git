@@ -264,89 +264,89 @@ func (m *RepoManager) HandleRepoNavigation(w http.ResponseWriter, r *http.Reques
 	// 1. Open the repo
 	gitRepo, err := git.PlainOpen(repoPath)
 	if err != nil {
-		log.Printf("Error opening repo: %v", err)
-		http.Error(w, "Repository not found", 404)
+		log.Printf("REDIRECT: Repo not found at %s", repoPath)
+		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
 
-	// 2. Check for HEAD (Handle Empty Repos)
 	ref, err := gitRepo.Head()
 	if err != nil {
 		m.renderTemplate(w, "repo_empty.tmpl", map[string]interface{}{
 			"RepoName": repo,
-			"Owner":    username, // Changed from Username to Owner
-			"SSHAddr":  r.Host,
+			"Owner":    username,
 		})
 		return
 	}
 
-	// 3. Get the tree from the latest commit
 	commit, _ := gitRepo.CommitObject(ref.Hash())
 	tree, _ := commit.Tree()
 
+	// 2. Initialize the base data map (Crucial: use 'Owner' to match your breadcrumbs)
 	data := map[string]interface{}{
 		"RepoName":    repo,
 		"Owner":       username,
-		"CurrentPath": strings.Trim(path, "/"),
+		"CurrentPath": path,
 		"LastCommit": map[string]interface{}{
 			"Message": commit.Message,
 			"Author":  commit.Author.Name,
 			"Date":    commit.Author.When.Format("Jan 02, 2006"),
-			"Hash":    commit.Hash.String(), // This is now a plain string
+			"Hash":    commit.Hash.String(),
 		},
 	}
 
-	// 4. Handle Root vs Subpath
+	// 3. Logic for Files vs Folders
 	if path == "" {
 		data["Files"] = tree.Entries
 		m.renderTemplate(w, "repo_view.tmpl", data)
 	} else {
-		entry, err := tree.FindEntry(path)
+		// CLEAN THE PATH: Git tree search fails with leading slashes
+		cleanPath := strings.Trim(path, "/")
+		entry, err := tree.FindEntry(cleanPath)
+
 		if err != nil {
-			http.Error(w, "File not found", 404)
+			log.Printf("REDIRECT: Git path '%s' not found", cleanPath)
+			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
 
 		if entry.Mode.IsFile() {
-			file, _ := tree.File(path)
+			file, _ := tree.File(cleanPath)
 			content, _ := file.Contents()
 
-			// Add file-specific data to our base map
 			data["FileName"] = entry.Name
 			data["Content"] = content
+			// Ensure this matches your file precisely
 			m.renderTemplate(w, "file_view.tmpl", data)
 		} else {
-			subTree, _ := tree.Tree(path)
-
-			// Add folder-specific data to our base map
+			subTree, _ := tree.Tree(cleanPath)
 			data["Files"] = subTree.Entries
 			m.renderTemplate(w, "repo_view.tmpl", data)
 		}
 	}
 }
-
 func (m *RepoManager) HandleView(w http.ResponseWriter, r *http.Request) {
-	// 1. Clean the path: "/view/michael/repo/.gitignore" -> "michael/repo/.gitignore"
+	// Strip /view/ and split
 	pathStr := strings.TrimPrefix(r.URL.Path, "/view/")
 	pathStr = strings.Trim(pathStr, "/")
-
 	parts := strings.Split(pathStr, "/")
 
-	// If we don't even have a username and repo name, go home
+	// If this log doesn't print, the issue is your Router/Mux
+	// not sending the request to this function at all.
+	log.Printf("DEBUG: Accessing Path: %s | Parts: %v", r.URL.Path, parts)
+
 	if len(parts) < 2 {
+		log.Printf("DEBUG: Redirecting because len(parts) is %d", len(parts))
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
 
-	username := parts[0]
+	owner := parts[0]
 	repoName := parts[1]
 
-	// 2. IMPORTANT: Everything after the repoName is the internal Git path
 	internalPath := ""
 	if len(parts) > 2 {
 		internalPath = strings.Join(parts[2:], "/")
 	}
 
-	// 3. Now call the navigation handler
-	m.HandleRepoNavigation(w, r, username, repoName, internalPath)
+	m.HandleRepoNavigation(w, r, owner, repoName, internalPath)
 }

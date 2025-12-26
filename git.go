@@ -36,7 +36,8 @@ func main() {
 	// User routing
 	http.HandleFunc("/", mgr.HandleDashboard) // Todo: show repos/users
 	// Example URL: /view/my-project/subdir/main.go
-	http.HandleFunc("GET /view/{owner}/{repo}", mgr.HandleView)
+	// Note the trailing slash! This allows /view/user/repo to work.
+	http.HandleFunc("/view/{path...}", mgr.HandleView)
 	http.HandleFunc("/create-repo", mgr.HandleCreateRepo)
 
 	// Start Servers
