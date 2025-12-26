@@ -1,8 +1,10 @@
 package main
 
 import (
+	"archive/zip"
 	"fmt"
 	"html/template"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
 type FileInfo struct {
@@ -261,7 +264,12 @@ func (m *RepoManager) HandleRepoView(w http.ResponseWriter, r *http.Request) {
 
 func (m *RepoManager) HandleRepoNavigation(w http.ResponseWriter, r *http.Request, username, repo, branchName, path string) {
 	repoPath := filepath.Join(m.BaseDir, username, repo+".git")
-	gitRepo, _ := git.PlainOpen(repoPath)
+	gitRepo, err := git.PlainOpen(repoPath)
+	if err != nil {
+		log.Printf("ERROR: Could not open repo at %s: %v", repoPath, err)
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
 
 	// 1. Get all branches for the dropdown
 	branchIter, _ := gitRepo.Branches()
@@ -273,11 +281,27 @@ func (m *RepoManager) HandleRepoNavigation(w http.ResponseWriter, r *http.Reques
 
 	// 2. Get the hash of the SELECTED branch
 	branchRef, _ := gitRepo.Reference(plumbing.NewBranchReferenceName(branchName), true)
-	// Fallback if branch doesn't exist
+
+	// FALLBACK: If selected branch doesn't exist, try HEAD
 	if branchRef == nil {
 		branchRef, _ = gitRepo.Head()
 	}
 
+	// --- SAFETY GATE FOR EMPTY REPOS ---
+	if branchRef == nil {
+		log.Printf("DEBUG: Repo %s is empty. Rendering setup guide.", repo)
+		m.renderTemplate(w, "repo_view.tmpl", map[string]interface{}{
+			"Owner":         username,
+			"RepoName":      repo,
+			"CurrentBranch": branchName,
+			"IsEmpty":       true,
+			"SSHAddr":       r.Host, // Dynamically get your server address
+		})
+		return
+	}
+	// -----------------------------------
+
+	// If we reach here, we have a valid branchRef
 	commit, _ := gitRepo.CommitObject(branchRef.Hash())
 	tree, _ := commit.Tree()
 
@@ -287,6 +311,7 @@ func (m *RepoManager) HandleRepoNavigation(w http.ResponseWriter, r *http.Reques
 		"CurrentBranch": branchName,
 		"Branches":      branches,
 		"CurrentPath":   path,
+		"SSHAddr":       r.Host,
 		"LastCommit": map[string]interface{}{
 			"Message": commit.Message,
 			"Author":  commit.Author.Name,
@@ -295,12 +320,30 @@ func (m *RepoManager) HandleRepoNavigation(w http.ResponseWriter, r *http.Reques
 		},
 	}
 
+	// Breadcrumbs logic
+	var breadcrumbs []map[string]string
+	if path != "" {
+		parts := strings.Split(strings.Trim(path, "/"), "/")
+		accumulatedPath := ""
+		for _, part := range parts {
+			if accumulatedPath == "" {
+				accumulatedPath = part
+			} else {
+				accumulatedPath = accumulatedPath + "/" + part
+			}
+			breadcrumbs = append(breadcrumbs, map[string]string{
+				"Name": part,
+				"Path": accumulatedPath,
+			})
+		}
+	}
+	data["Breadcrumbs"] = breadcrumbs
+
 	// 3. Logic for Files vs Folders
 	if path == "" {
 		data["Files"] = tree.Entries
 		m.renderTemplate(w, "repo_view.tmpl", data)
 	} else {
-		// CLEAN THE PATH: Git tree search fails with leading slashes
 		cleanPath := strings.Trim(path, "/")
 		entry, err := tree.FindEntry(cleanPath)
 
@@ -316,7 +359,13 @@ func (m *RepoManager) HandleRepoNavigation(w http.ResponseWriter, r *http.Reques
 
 			data["FileName"] = entry.Name
 			data["Content"] = content
-			// Ensure this matches your file precisely
+
+			ext := filepath.Ext(entry.Name)
+			if len(ext) > 0 {
+				data["Extension"] = ext[1:]
+			} else {
+				data["Extension"] = "clike"
+			}
 			m.renderTemplate(w, "file_view.tmpl", data)
 		} else {
 			subTree, _ := tree.Tree(cleanPath)
@@ -325,6 +374,7 @@ func (m *RepoManager) HandleRepoNavigation(w http.ResponseWriter, r *http.Reques
 		}
 	}
 }
+
 func (m *RepoManager) HandleView(w http.ResponseWriter, r *http.Request) {
 	pathStr := strings.TrimPrefix(r.URL.Path, "/view/")
 	pathStr = strings.Trim(pathStr, "/")
@@ -352,4 +402,51 @@ func (m *RepoManager) HandleView(w http.ResponseWriter, r *http.Request) {
 	}
 
 	m.HandleRepoNavigation(w, r, username, repoName, branch, internalPath)
+}
+
+func (m *RepoManager) HandleDownloadZip(w http.ResponseWriter, r *http.Request) {
+	// Assuming URL format: /download/{owner}/{repo}/{branch}
+	pathStr := strings.TrimPrefix(r.URL.Path, "/download/")
+	parts := strings.Split(strings.Trim(pathStr, "/"), "/")
+	if len(parts) < 3 {
+		http.Error(w, "Invalid request", 400)
+		return
+	}
+
+	username, repo, branchName := parts[0], parts[1], parts[2]
+	repoPath := filepath.Join(m.BaseDir, username, repo+".git")
+	gitRepo, _ := git.PlainOpen(repoPath)
+
+	// Get the tree for the specific branch
+	branchRef, _ := gitRepo.Reference(plumbing.NewBranchReferenceName(branchName), true)
+	commit, _ := gitRepo.CommitObject(branchRef.Hash())
+	tree, _ := commit.Tree()
+
+	// Set headers to trigger a download
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s-%s.zip", repo, branchName))
+
+	zw := zip.NewWriter(w)
+	defer zw.Close()
+
+	// Walk the git tree and add files to zip
+	tree.Files().ForEach(func(f *object.File) error {
+		header := &zip.FileHeader{
+			Name:   f.Name,
+			Method: zip.Deflate,
+		}
+		writer, err := zw.CreateHeader(header)
+		if err != nil {
+			return err
+		}
+
+		reader, err := f.Reader()
+		if err != nil {
+			return err
+		}
+		defer reader.Close()
+
+		_, err = io.Copy(writer, reader)
+		return err
+	})
 }

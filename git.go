@@ -38,6 +38,7 @@ func main() {
 	// Example URL: /view/my-project/subdir/main.go
 	// Note the trailing slash! This allows /view/user/repo to work.
 	http.HandleFunc("/view/{path...}", mgr.HandleView)
+	http.HandleFunc("/download/view/{path...}", mgr.HandleDownloadZip)
 	http.HandleFunc("/create-repo", mgr.HandleCreateRepo)
 
 	// Start Servers
