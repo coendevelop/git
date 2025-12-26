@@ -24,7 +24,7 @@ func main() {
 	http.HandleFunc("/register", store.HandleRegister)
 	http.HandleFunc("/login", store.HandleLogin)
 	// Todo: http.HandleFunc("/logout", HandleLogout)
-	http.HandleFunc("/dashboard", mgr.HandleDashboard) // Todo: show repos/users
+	http.HandleFunc("/", mgr.HandleDashboard) // Todo: show repos/users
 	// Future: http.HandleFunc("/repo/", mgr.HandleRepoView)
 
 	// Start Servers

@@ -11,18 +11,37 @@ import (
 )
 
 const schema = `
+-- 1. Users table: Stores identity and web credentials
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE NOT NULL,
-	password_hash TEXT NOT NULL
+    password_hash TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 2. Public Keys table: Maps SSH keys to users
+-- Note: key_data stores the full "ssh-rsa AAA..." string
 CREATE TABLE IF NOT EXISTS public_keys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
+    user_id INTEGER NOT NULL,
     key_data TEXT NOT NULL,
-    FOREIGN KEY(user_id) REFERENCES users(id)
-);`
+    label TEXT, -- e.g., "Work Laptop"
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- 3. Sessions table: Maps random tokens to users for Web UI auth
+CREATE TABLE IF NOT EXISTS sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token TEXT UNIQUE NOT NULL,
+    user_id INTEGER NOT NULL,
+    expires_at DATETIME NOT NULL,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- Optimization: Index the session tokens for fast lookups
+CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
+-- Optimization: Index key_data for fast SSH authentication
+CREATE INDEX IF NOT EXISTS idx_public_keys_data ON public_keys(key_data);`
 
 type AuthStore struct {
 	db *sql.DB

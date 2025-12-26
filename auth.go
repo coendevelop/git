@@ -4,7 +4,9 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
+	"fmt"
 	"html/template"
+	"log"
 	"net/http"
 
 	"golang.org/x/crypto/bcrypt"
@@ -49,36 +51,47 @@ func (s *AuthStore) GetUserByToken(token string) (string, error) {
 	return username, nil
 }
 
-func setSessionCookie(w http.ResponseWriter, username string) {
-	cookie := &http.Cookie{
-		Name:     "session_user",
-		Value:    username,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   false, // Set to true in production with HTTPS
-		MaxAge:   86400, // Keeps the user logged in for 24 hours
+func (s *AuthStore) setSessionCookie(w http.ResponseWriter, username string) {
+	token, err := s.CreateSession(username)
+	if err != nil {
+		log.Printf("Session creation failed: %v", err)
+		return
 	}
+
+	cookie := &http.Cookie{
+		Name:     "session_token",
+		Value:    token,
+		Path:     "/",                  // MUST be "/" so the Dashboard can see it
+		HttpOnly: true,                 // Security best practice
+		Secure:   false,                // Set to true only if using HTTPS
+		MaxAge:   86400,                // 24 hours in seconds
+		SameSite: http.SameSiteLaxMode, // Helps with modern browser redirects
+	}
+
 	http.SetCookie(w, cookie)
+	log.Printf("Cookie set successfully for user: %s", username)
 }
 
 func (s *AuthStore) RegisterUser(username, password string) error {
-	// 1. Hash the password
-	// Cost 10 is a good balance between security and speed
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), 10)
 	if err != nil {
-		return err
+		return fmt.Errorf("hashing failed: %w", err)
 	}
 
-	// 2. Insert into database
 	_, err = s.db.Exec("INSERT INTO users (username, password_hash) VALUES (?, ?)",
 		username, string(hashedPassword))
-	return err
+
+	if err != nil {
+		// This will print the EXACT reason (e.g., "UNIQUE constraint failed" or "no such table")
+		log.Printf("SQL Error during registration: %v", err)
+		return fmt.Errorf("db insert failed: %w", err)
+	}
+	return nil
 }
 
 func (s *AuthStore) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
-		// Serve your register.html file
-		tmpl, _ := template.ParseFS(templateFiles, "templates/register.tmpl")
+		tmpl, _ := template.ParseFS(templateFiles, "templates/register.html")
 		tmpl.Execute(w, nil)
 		return
 	}
@@ -87,19 +100,21 @@ func (s *AuthStore) HandleRegister(w http.ResponseWriter, r *http.Request) {
 		username := r.FormValue("username")
 		password := r.FormValue("password")
 
-		// 1. Save user to DB
+		// 1. Attempt registration
 		err := s.RegisterUser(username, password)
 		if err != nil {
-			http.Error(w, "Registration failed", http.StatusConflict)
+			// If it fails (e.g., user already exists), tell the user and STOP
+			log.Printf("Registration error: %v", err)
+			http.Error(w, "User already exists", http.StatusConflict)
 			return
 		}
 
-		// 2. NEW: Automatically set the cookie to log them in
-		setSessionCookie(w, username)
+		// 2. Set the session cookie
+		s.setSessionCookie(w, username)
 
-		// 3. Redirect to dashboard
+		// 3. IMPORTANT: Redirect immediately to prevent a "Refresh" or "Double Click" from re-submitting
 		http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
-		return
+		return // Ensure we stop execution here
 	}
 }
 
@@ -138,7 +153,7 @@ func (s *AuthStore) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	setSessionCookie(w, username)
+	s.setSessionCookie(w, username)
 
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 }
