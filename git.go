@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -47,6 +48,16 @@ type FileInfo struct {
 	Name  string
 	IsURL bool
 	Size  int64
+}
+
+type CommitInfo struct {
+	Hash         string
+	ShortHash    string
+	Author       string
+	Email        string
+	When         string
+	Message      string
+	MessageShort string
 }
 
 const initSchema = `
@@ -196,11 +207,15 @@ func main() {
 	http.HandleFunc("/logout", app.HandleLogout)
 
 	http.HandleFunc("/", app.HandleDashboard)
-	http.HandleFunc("/view/", app.HandleView)
 	http.HandleFunc("/download/view/", app.HandleDownloadZip)
+	http.HandleFunc("/upload", app.HandleUpload)
+	http.HandleFunc("/edit", app.HandleEdit)
 	http.HandleFunc("/create-repo", app.HandleCreateRepo)
 	http.HandleFunc("/favorite/add", app.HandleAddFavorite)
 	http.HandleFunc("/favorite/remove", app.HandleRemoveFavorite)
+	http.HandleFunc("/view/", func(w http.ResponseWriter, r *http.Request) {
+		app.HandleView(w, r)
+	})
 
 	// Start HTTP Server
 	go func() {
@@ -339,52 +354,166 @@ func (a *App) HandleCreateRepo(w http.ResponseWriter, r *http.Request) {
 	isPriv := r.FormValue("is_private") == "1"
 	autoInit := r.FormValue("init_readme") == "1"
 
-	repoPath := filepath.Join(a.BaseDir, user, repoName+".git")
-
-	// 1. Initialize the repository
-	// If autoInit is true, we init a non-bare repo first to create the commit
-	var gitRepo *git.Repository
-	if autoInit {
-		gitRepo, err = git.PlainInit(repoPath, false) // false = non-bare
-		if err == nil {
-			wt, _ := gitRepo.Worktree()
-			readmePath := filepath.Join(repoPath, "README.md")
-			os.WriteFile(readmePath, []byte("# "+repoName+"\n\nInitial repository setup."), 0644)
-
-			wt.Add("README.md")
-			wt.Commit("Initial commit: add README.md", &git.CommitOptions{
-				Author: &object.Signature{
-					Name:  user,
-					Email: user + "@coendevelop.org",
-					When:  time.Now(),
-				},
-			})
-			// Optional: Convert to bare or keep as is.
-			// For simplicity in this environment, we'll keep it as is.
-		}
-	} else {
-		_, err = git.PlainInit(repoPath, true) // true = bare
-	}
-
-	if err != nil {
-		http.Error(w, "Failed to init repo", 500)
+	// Ensure the user's directory exists
+	userDir := filepath.Join(a.BaseDir, user)
+	if err := os.MkdirAll(userDir, 0755); err != nil {
+		http.Error(w, "Failed to create user directory", 500)
 		return
 	}
 
-	// 2. Insert into DB
+	repoPath := filepath.Join(userDir, repoName+".git")
+
+	// 1. Initialize the repository
+	if autoInit {
+		// Initialize a non-bare repository to allow for a worktree and initial commit
+		gitRepo, err := git.PlainInit(repoPath, false)
+		if err != nil {
+			http.Error(w, "Failed to init repo with README", 500)
+			return
+		}
+
+		wt, err := gitRepo.Worktree()
+		if err != nil {
+			http.Error(w, "Failed to get worktree", 500)
+			return
+		}
+
+		// Create the initial README.md
+		readmePath := filepath.Join(repoPath, "README.md")
+		readmeContent := fmt.Sprintf("# %s\n\nInitial repository setup by %s.", repoName, user)
+		if err := os.WriteFile(readmePath, []byte(readmeContent), 0644); err != nil {
+			http.Error(w, "Failed to write README", 500)
+			return
+		}
+
+		// Commit the README
+		if _, err := wt.Add("README.md"); err != nil {
+			http.Error(w, "Failed to stage README", 500)
+			return
+		}
+
+		_, err = wt.Commit("Initial commit: add README.md", &git.CommitOptions{
+			Author: &object.Signature{
+				Name:  user,
+				Email: user + "@coendevelop.org",
+				When:  time.Now(),
+			},
+		})
+		if err != nil {
+			http.Error(w, "Failed to create initial commit", 500)
+			return
+		}
+	} else {
+		// Initialize a standard bare repository for remote pushing
+		_, err = git.PlainInit(repoPath, true)
+		if err != nil {
+			http.Error(w, "Failed to init bare repo", 500)
+			return
+		}
+	}
+
+	// 2. Insert repository record into the DB
 	privInt := 0
 	if isPriv {
 		privInt = 1
 	}
+
 	_, err = a.DB.Exec(`INSERT INTO repositories (user_id, name, description, is_private)
 		VALUES ((SELECT id FROM users WHERE username = ? COLLATE NOCASE), ?, ?, ?)`,
 		user, repoName, "No description", privInt)
 
 	if err != nil {
-		http.Error(w, "DB Error", 500)
+		// If DB insertion fails, we should ideally clean up the disk,
+		// but for now we'll just report the error.
+		http.Error(w, "Database error: "+err.Error(), 500)
 		return
 	}
+
+	// Redirect to the repository view - the main branch should now exist if autoInit was true
 	http.Redirect(w, r, "/view/"+user+"/"+repoName+"/main/", http.StatusSeeOther)
+}
+
+func (a *App) HandleCommits(w http.ResponseWriter, r *http.Request) {
+	// Path format: /view/{user}/{repo}/commits/{branch}
+	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/view/"), "/"), "/")
+	if len(parts) < 4 {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
+	username := parts[0]
+	repoName := parts[1]
+	// parts[2] is literally the string "commits"
+	branchName := parts[3]
+
+	// Privacy Check
+	viewer, _ := a.GetUserByTokenFromRequest(r)
+	var isPriv int
+	err := a.DB.QueryRow(`SELECT is_private FROM repositories WHERE name=? 
+		AND user_id=(SELECT id FROM users WHERE username=?)`, repoName, username).Scan(&isPriv)
+	if (err != nil) || (isPriv == 1 && viewer != username) {
+		http.Error(w, "Not found", 404)
+		return
+	}
+
+	repoPath := filepath.Join(a.BaseDir, username, repoName+".git")
+	gitRepo, err := git.PlainOpen(repoPath)
+	if err != nil {
+		http.Error(w, "Repository not found", 404)
+		return
+	}
+
+	// Resolve the branch to a hash
+	hash, err := gitRepo.ResolveRevision(plumbing.Revision(branchName))
+	if err != nil {
+		// Fallback to HEAD if branch doesn't exist
+		hash, _ = gitRepo.ResolveRevision(plumbing.Revision("HEAD"))
+	}
+
+	// Get the commit log
+	cIter, err := gitRepo.Log(&git.LogOptions{From: *hash})
+	if err != nil {
+		http.Error(w, "Failed to retrieve commits", 500)
+		return
+	}
+
+	var commits []CommitInfo
+	err = cIter.ForEach(func(c *object.Commit) error {
+		// Limit to last 50 commits for performance; can add pagination later
+		if len(commits) >= 50 {
+			return fmt.Errorf("limit reached")
+		}
+
+		msgLines := strings.Split(strings.TrimSpace(c.Message), "\n")
+		shortMsg := msgLines[0]
+		if len(shortMsg) > 80 {
+			shortMsg = shortMsg[:77] + "..."
+		}
+
+		commits = append(commits, CommitInfo{
+			Hash:         c.Hash.String(),
+			ShortHash:    c.Hash.String()[:7],
+			Author:       c.Author.Name,
+			Email:        c.Author.Email,
+			When:         c.Author.When.Format("Jan 02, 2006 15:04"),
+			Message:      c.Message,
+			MessageShort: shortMsg,
+		})
+		return nil
+	})
+
+	// Data for template
+	data := map[string]interface{}{
+		"Owner":         username,
+		"RepoName":      repoName,
+		"CurrentBranch": branchName,
+		"Commits":       commits,
+		"IsLoggedIn":    viewer != "",
+		"Username":      viewer,
+	}
+
+	// We'll need a new template for this: repo_commits.tmpl
+	a.render(w, "repo_commits.tmpl", data)
 }
 
 func (a *App) HandleDashboard(w http.ResponseWriter, r *http.Request) {
@@ -492,22 +621,51 @@ func (a *App) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) HandleView(w http.ResponseWriter, r *http.Request) {
-	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/view/"), "/"), "/")
+	// If the user is submitting an edit form, route to the HandleEdit logic
+	if r.Method == http.MethodPost {
+		a.HandleEdit(w, r)
+		return
+	}
+
+	// Path parsing: /view/{user}/{repo}/{mode}/{branch}/{path...}
+	rawPath := strings.TrimPrefix(r.URL.Path, "/view/")
+	parts := strings.Split(strings.Trim(rawPath, "/"), "/")
+
 	if len(parts) < 2 {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
+
 	username, repoName := parts[0], parts[1]
+
+	isCommitsView := false
+	isDiffView := false
+	targetHash := ""
 	branchName := "main"
-	path := ""
-	if len(parts) > 2 {
-		branchName = parts[2]
-	}
-	if len(parts) > 3 {
-		path = strings.Join(parts[3:], "/")
+	remainingParts := parts[2:]
+
+	// Route detection (Commits vs Diff vs Standard View)
+	if len(remainingParts) > 0 {
+		if remainingParts[0] == "commits" {
+			isCommitsView = true
+			remainingParts = remainingParts[1:]
+		} else if remainingParts[0] == "commit" {
+			isDiffView = true
+			if len(remainingParts) > 1 {
+				targetHash = remainingParts[1]
+			}
+			remainingParts = remainingParts[1:]
+		}
 	}
 
-	// Privacy Check
+	if len(remainingParts) > 0 && !isDiffView {
+		branchName = remainingParts[0]
+		remainingParts = remainingParts[1:]
+	}
+
+	path := strings.Join(remainingParts, "/")
+
+	// Privacy and Access Check
 	viewer, _ := a.GetUserByTokenFromRequest(r)
 	var isPriv int
 	a.DB.QueryRow(`SELECT is_private FROM repositories WHERE name=? 
@@ -519,69 +677,182 @@ func (a *App) HandleView(w http.ResponseWriter, r *http.Request) {
 
 	repoPath := filepath.Join(a.BaseDir, username, repoName+".git")
 	gitRepo, err := git.PlainOpen(repoPath)
-
-	// Setup View Data
-	data := map[string]interface{}{
-		"Owner": username, "RepoName": repoName, "CurrentBranch": branchName,
-		"SSHAddr": r.Host, "CurrentPath": path,
+	if err != nil {
+		http.Error(w, "Repository not found", 404)
+		return
 	}
 
-	// Helper for empty repo
-	if err != nil || func() bool { _, e := gitRepo.Head(); return e != nil }() {
-		data["IsEmpty"] = true
+	// Setup Base View Data
+	data := map[string]interface{}{
+		"Owner":         username,
+		"RepoName":      repoName,
+		"CurrentBranch": branchName,
+		"SSHAddr":       r.Host,
+		"CurrentPath":   path,
+		"IsCommitsView": isCommitsView,
+		"IsDiffView":    isDiffView,
+		"IsLoggedIn":    viewer != "",
+		"Username":      viewer,
+	}
+
+	// Resolve Revision (Branch or Hash)
+	hash, err := gitRepo.ResolveRevision(plumbing.Revision(branchName))
+	if err != nil {
+		hash, err = gitRepo.ResolveRevision(plumbing.Revision("HEAD"))
+		if err != nil {
+			data["IsEmpty"] = true
+			a.render(w, "repo_view.tmpl", data)
+			return
+		}
+	}
+
+	// Fetch Repository Metadata (Stars/Downloads)
+	var dl, star int
+	a.DB.QueryRow(`SELECT download_count, star_count FROM repositories 
+		WHERE name=? AND user_id=(SELECT id FROM users WHERE username=?)`, repoName, username).Scan(&dl, &star)
+	data["DownloadCount"] = dl
+	data["StarCount"] = star
+
+	// --- LOGIC FOR DIFF VIEW ---
+	if isDiffView {
+		cHash := plumbing.NewHash(targetHash)
+		commit, _ := gitRepo.CommitObject(cHash)
+		parent, _ := commit.Parent(0)
+
+		currentTree, _ := commit.Tree()
+		var patch *object.Patch
+
+		if parent != nil {
+			parentTree, _ := parent.Tree()
+			changes, _ := parentTree.Diff(currentTree)
+			patch, _ = changes.Patch()
+		} else {
+			changes, _ := (&object.Tree{}).Diff(currentTree)
+			patch, _ = changes.Patch()
+		}
+
+		data["Diff"] = patch.String()
+		data["SelectedCommit"] = map[string]interface{}{
+			"Hash":    commit.Hash.String(),
+			"Author":  commit.Author.Name,
+			"Date":    commit.Author.When.Format("Jan 02, 2006 15:04"),
+			"Message": commit.Message,
+		}
+		data["LastCommit"] = map[string]interface{}{
+			"Message": commit.Message,
+			"Author":  commit.Author.Name,
+			"Date":    commit.Author.When.Format("Jan 02, 2006"),
+		}
+
 		a.render(w, "repo_view.tmpl", data)
 		return
 	}
 
-	// Resolve Branch
-	hash, err := gitRepo.ResolveRevision(plumbing.Revision(branchName))
-	if err != nil {
-		hash, _ = gitRepo.ResolveRevision(plumbing.Revision("HEAD")) // Fallback
-	}
-
-	commit, _ := gitRepo.CommitObject(*hash)
-	tree, _ := commit.Tree()
-
-	// Get Meta
-	var dl, star int
-	a.DB.QueryRow(`SELECT download_count, star_count FROM repositories 
-		WHERE name=? AND user_id=(SELECT id FROM users WHERE username=?)`, repoName, username).Scan(&dl, &star)
-
-	isFav := false
-	if viewer != "" {
-		var ex int
-		a.DB.QueryRow(`SELECT EXISTS(SELECT 1 FROM favorites f JOIN repositories r ON f.repo_id=r.id 
-			WHERE f.user_id=(SELECT id FROM users WHERE username=?) AND r.name=? 
-			AND r.user_id=(SELECT id FROM users WHERE username=?))`, viewer, repoName, username).Scan(&ex)
-		isFav = ex == 1
-	}
-
-	data["DownloadCount"] = dl
-	data["StarCount"] = star
-	data["IsFavorite"] = isFav
+	// Standard View Logic (File list or Content)
+	mainCommit, _ := gitRepo.CommitObject(*hash)
 	data["LastCommit"] = map[string]interface{}{
-		"Message": commit.Message, "Author": commit.Author.Name, "Date": commit.Author.When.Format("Jan 02, 2006"),
+		"Message": mainCommit.Message,
+		"Author":  mainCommit.Author.Name,
+		"Date":    mainCommit.Author.When.Format("Jan 02, 2006"),
 	}
 
-	// If viewing a file
-	if path != "" {
-		entry, err := tree.FindEntry(path)
-		if err != nil {
-			http.Redirect(w, r, "/", http.StatusSeeOther)
-			return
+	// --- LOGIC FOR COMMITS LIST (PAGINATED) ---
+	if isCommitsView {
+		pageSize := 20
+		pageStr := r.URL.Query().Get("page")
+		page := 1
+		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+			page = p
 		}
-		if entry.Mode.IsFile() {
-			file, _ := tree.File(path)
-			content, _ := file.Contents()
-			data["IsFile"] = true
-			data["Content"] = content
-			data["FileName"] = entry.Name
-			data["Extension"] = strings.TrimPrefix(filepath.Ext(entry.Name), ".")
+
+		cIter, _ := gitRepo.Log(&git.LogOptions{From: *hash})
+		var commits []map[string]interface{}
+
+		count := 0
+		skip := (page - 1) * pageSize
+		hasMore := false
+
+		err = cIter.ForEach(func(c *object.Commit) error {
+			if count < skip {
+				count++
+				return nil
+			}
+			if len(commits) >= pageSize {
+				hasMore = true
+				return fmt.Errorf("limit reached")
+			}
+
+			msgLines := strings.Split(strings.TrimSpace(c.Message), "\n")
+			commits = append(commits, map[string]interface{}{
+				"Hash":         c.Hash.String(),
+				"ShortHash":    c.Hash.String()[:7],
+				"Author":       c.Author.Name,
+				"Date":         c.Author.When.Format("Jan 02, 2006 15:04"),
+				"MessageShort": msgLines[0],
+			})
+			count++
+			return nil
+		})
+
+		data["Commits"] = commits
+		data["CurrentPage"] = page
+		if page > 1 {
+			data["PrevPage"] = page - 1
+		}
+		if hasMore {
+			data["NextPage"] = page + 1
+		}
+	} else {
+		// --- LOGIC FOR FILE BROWSER / FILE VIEWER ---
+		tree, _ := mainCommit.Tree()
+		if path != "" {
+			entry, err := tree.FindEntry(path)
+			if err != nil {
+				http.Redirect(w, r, "/view/"+username+"/"+repoName+"/"+branchName+"/", http.StatusSeeOther)
+				return
+			}
+			if entry.Mode.IsFile() {
+				file, _ := tree.File(path)
+				content, _ := file.Contents()
+				data["IsFile"] = true
+				data["Content"] = content
+				data["FileName"] = entry.Name
+				// FIX: Set CurrentPath to the directory portion only to avoid path duplication
+				dir := filepath.Dir(path)
+				if dir == "." {
+					data["CurrentPath"] = ""
+				} else {
+					data["CurrentPath"] = dir
+				}
+				data["Extension"] = strings.TrimPrefix(filepath.Ext(entry.Name), ".")
+			} else {
+				subTree, _ := tree.Tree(path)
+				var files []FileInfo
+				for _, ent := range subTree.Entries {
+					var size int64
+					if ent.Mode.IsFile() {
+						f, _ := subTree.File(ent.Name)
+						size = f.Size
+					}
+					files = append(files, FileInfo{Name: ent.Name, IsURL: !ent.Mode.IsFile(), Size: size})
+				}
+				data["Files"] = files
+			}
 		} else {
-			data["IsFile"] = false
+			// Root Directory Listing
+			var files []FileInfo
+			for _, ent := range tree.Entries {
+				var size int64
+				if ent.Mode.IsFile() {
+					f, _ := tree.File(ent.Name)
+					size = f.Size
+				}
+				files = append(files, FileInfo{Name: ent.Name, IsURL: !ent.Mode.IsFile(), Size: size})
+			}
+			data["Files"] = files
 		}
 	}
-	// Repository Viewer
+
 	a.render(w, "repo_view.tmpl", data)
 }
 
@@ -631,6 +902,146 @@ func (a *App) HandleDownloadZip(w http.ResponseWriter, r *http.Request) {
 		io.Copy(writer, reader)
 		return nil
 	})
+}
+
+// HandleUpload handles file uploads to a repository's current directory.
+func (a *App) HandleUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
+
+	user, err := a.GetUserByTokenFromRequest(r)
+	if err != nil {
+		http.Redirect(w, r, "/auth", http.StatusSeeOther)
+		return
+	}
+
+	// Parse the multipart form (10MB limit)
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		http.Error(w, "File too large", 400)
+		return
+	}
+
+	owner := r.FormValue("owner")
+	repoName := r.FormValue("repo")
+	path := r.FormValue("path")
+
+	if user != owner {
+		http.Error(w, "Unauthorized", 403)
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "Invalid file", 400)
+		return
+	}
+	defer file.Close()
+
+	repoPath := filepath.Join(a.BaseDir, owner, repoName+".git")
+	gitRepo, _ := git.PlainOpen(repoPath)
+	wt, _ := gitRepo.Worktree()
+
+	// Save file to worktree
+	dstPath := filepath.Join(repoPath, path, header.Filename)
+	dst, _ := os.Create(dstPath)
+	defer dst.Close()
+	io.Copy(dst, file)
+
+	// Commit changes - Corrected CommitOptions usage
+	wt.Add(filepath.Join(path, header.Filename))
+	_, err = wt.Commit("Upload "+header.Filename, &git.CommitOptions{
+		Author: &object.Signature{
+			Name:  user,
+			Email: user + "@coendevelop.org",
+			When:  time.Now(),
+		},
+	})
+
+	if err != nil {
+		http.Error(w, "Commit failed: "+err.Error(), 500)
+		return
+	}
+
+	http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
+}
+
+// HandleEdit saves changes made to an existing file via the web editor.
+func (a *App) HandleEdit(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// 1. Authentication Check
+	user, err := a.GetUserByTokenFromRequest(r)
+	if err != nil {
+		http.Redirect(w, r, "/auth", http.StatusSeeOther)
+		return
+	}
+
+	// 2. Parse Form Data
+	owner := r.FormValue("owner")
+	repoName := r.FormValue("repo")
+	filePath := r.FormValue("path") // This is the relative path from the repo root
+	content := r.FormValue("content")
+
+	// Security: Ensure the logged-in user owns the repository
+	if user != owner {
+		http.Error(w, "Unauthorized to edit this repository", http.StatusUnauthorized)
+		return
+	}
+
+	// 3. Open the Repository
+	repoPath := filepath.Join(a.BaseDir, owner, repoName+".git")
+	gitRepo, err := git.PlainOpen(repoPath)
+	if err != nil {
+		http.Error(w, "Repository not found", 404)
+		return
+	}
+
+	wt, err := gitRepo.Worktree()
+	if err != nil {
+		http.Error(w, "Worktree not available (ensure repo is not bare)", 500)
+		return
+	}
+
+	// 4. Write the new content to the file
+	// FIX: Use the filePath directly relative to the repoPath
+	fullPath := filepath.Join(repoPath, filePath)
+
+	// Ensure the directory exists (in case of new files in subdirectories)
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+		http.Error(w, "Failed to create directory: "+err.Error(), 500)
+		return
+	}
+
+	if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
+		http.Error(w, "Failed to write file: "+err.Error(), 500)
+		return
+	}
+
+	// 5. Commit the changes
+	if _, err := wt.Add(filePath); err != nil {
+		http.Error(w, "Failed to stage changes: "+err.Error(), 500)
+		return
+	}
+
+	_, err = wt.Commit("Update "+filepath.Base(filePath)+" via Web Editor", &git.CommitOptions{
+		Author: &object.Signature{
+			Name:  user,
+			Email: user + "@coendevelop.org",
+			When:  time.Now(),
+		},
+	})
+	if err != nil {
+		http.Error(w, "Failed to commit changes: "+err.Error(), 500)
+		return
+	}
+
+	// 6. Redirect back to the file view
+	http.Redirect(w, r, r.Header.Get("Referer"), http.StatusSeeOther)
 }
 
 // --- Favorites ---
