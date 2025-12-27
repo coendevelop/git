@@ -1,8 +1,11 @@
-{{/* Repository view template: shows file listing, branches, download and
-   quick setup instructions for empty repos. Expects fields like .Owner,
-   .RepoName, .Files, .Branches, .CurrentBranch and .LastCommit. */}}
+{{/* Unified Repository View: Handles Directory Listing, File Viewing, and Empty Repo Setup */}}
 {{template "base/header.tmpl" .}}
 {{template "base/navbar.tmpl" .}}
+
+{{if .IsFile}}
+<link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" rel="stylesheet" id="prism-light" />
+<link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" id="prism-dark" disabled />
+{{end}}
 
 <style>
     .breadcrumb-item + .breadcrumb-item::before { 
@@ -17,137 +20,148 @@
         background-color: var(--bs-body-tertiary-bg);
         border: 1px solid var(--bs-border-color);
     }
-    /* Minimalist code block for setup instructions */
     .setup-code {
         background-color: var(--bs-tertiary-bg);
         border: 1px solid var(--bs-border-color);
         color: var(--bs-body-color);
     }
+    .code-container {
+        border-radius: 8px;
+        overflow: hidden;
+        border: 1px solid var(--bs-border-color);
+    }
+    pre {
+        margin-bottom: 0 !important;
+        border-radius: 0 !important;
+        background-color: var(--bs-body-tertiary-bg) !important;
+    }
+    code {
+        font-family: 'Fira Code', 'Consolas', monospace;
+        font-size: 0.9rem;
+    }
 </style>
 
 <div class="container py-4">
-    <nav aria-label="breadcrumb">
-        <ol class="breadcrumb py-2 px-3 breadcrumb-container rounded shadow-sm">
-            <li class="breadcrumb-item">
-                <a href="/view/{{$.Owner}}/{{$.RepoName}}/{{$.CurrentBranch}}/" class="fw-bold text-decoration-none text-primary">
-                    {{$.RepoName}}
-                </a>
-            </li>
-            {{range .Breadcrumbs}}
-            <li class="breadcrumb-item">
-                <a href="/view/{{$.Owner}}/{{$.RepoName}}/{{$.CurrentBranch}}/{{.Path}}" class="text-decoration-none">
-                    {{.Name}}
-                </a>
-            </li>
-            {{end}}
-        </ol>
-    </nav>
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb py-2 px-3 breadcrumb-container rounded shadow-sm mb-0">
+                <li class="breadcrumb-item">
+                    <a href="/view/{{$.Owner}}/{{$.RepoName}}/{{$.CurrentBranch}}/" class="fw-bold text-decoration-none text-primary">
+                        {{$.RepoName}}
+                    </a>
+                </li>
+                {{range .Breadcrumbs}}
+                <li class="breadcrumb-item"><a href="{{.Path}}" class="text-decoration-none text-body">{{.Name}}</a></li>
+                {{end}}
+            </ol>
+        </nav>
 
-    <div class="d-flex align-items-center mb-4">
-        <div class="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center me-3 shadow-sm" style="width: 48px; height: 48px;">
-            📄
-        </div>
-        <div class="flex-grow-1">
-            <h2 class="mb-0 text-body">
-                <span class="text-body-secondary fw-light">{{.Owner}} /</span> {{.RepoName}}
-            </h2>
-            {{if .LastCommit}}
-                <p class="text-body-secondary small mb-0">
-                    Latest commit: <span class="font-monospace text-primary">{{printf "%.7s" .LastCommit.Hash}}</span> 
-                    — {{.LastCommit.Message}}
-                </p>
-            {{else}}
-                <p class="text-warning small mb-0">No commits yet</p>
-            {{end}}
-        </div>
-
-        {{if .Files}}
-        <div class="d-flex gap-2">
+        <div class="d-flex gap-2 align-items-center">
             <div class="dropdown">
-                <button class="btn btn-outline-primary dropdown-toggle btn-sm shadow-sm" type="button" data-bs-toggle="dropdown">
-                    <span class="text-body-secondary small">Branch:</span> <strong>{{$.CurrentBranch}}</strong>
+                <button class="btn btn-outline-secondary btn-sm dropdown-toggle fw-bold" type="button" data-bs-toggle="dropdown">
+                    Branch: {{.CurrentBranch}}
                 </button>
-                <ul class="dropdown-menu dropdown-menu-end shadow">
+                <ul class="dropdown-menu">
                     {{range .Branches}}
-                    <li><a class="dropdown-item {{if eq . $.CurrentBranch}}active{{end}}" href="/view/{{$.Owner}}/{{$.RepoName}}/{{.}}/">{{.}}</a></li>
+                    <li><a class="dropdown-item" href="/view/{{$.Owner}}/{{$.RepoName}}/{{.}}/">{{.}}</a></li>
                     {{end}}
                 </ul>
             </div>
-            <div class="d-flex align-items-center gap-2">
-                <button class="btn btn-sm btn-primary star-btn shadow-sm fw-bold px-2 rounded-pill d-inline-flex align-items-center gap-1" data-owner="{{.Owner}}" data-repo="{{.RepoName}}" aria-label="Toggle favorite" aria-pressed="{{if .IsFavorite}}true{{else}}false{{end}}">
-                    <span class="star-glyph fs-5">{{if .IsFavorite}}★{{else}}☆{{end}}</span>
-                    <span class="small ms-1 star-count">{{.StarCount}}</span>
-                </button>
-                <a href="/download/view/{{$.Owner}}/{{$.RepoName}}/{{$.CurrentBranch}}" class="btn btn-sm btn-primary shadow-sm fw-bold px-2 rounded-pill d-inline-flex align-items-center gap-1" role="button" aria-label="Download {{$.RepoName}} as zip" title="{{.DownloadCount}} downloads">
-                    <span class="d-inline-block fs-5">📦</span>
-                    <span class="small ms-1 d-none d-sm-inline">{{.DownloadCount}}</span>
-                </a>
-            </div>
+            <a href="/download/{{.Owner}}/{{.RepoName}}/{{.CurrentBranch}}" class="btn btn-sm btn-primary px-3 shadow-sm">
+                <strong>↓</strong> Download ZIP
+            </a>
         </div>
-        {{end}}
     </div>
 
-    {{if .Files}}
-    <div class="card shadow-sm border">
-        <div class="card-header bg-body-tertiary py-3 d-flex justify-content-between align-items-center border-bottom">
-            <span class="fw-bold text-body">Files</span>
-            <span class="badge bg-secondary-soft text-secondary border border-secondary px-3 rounded-pill">
-                {{len .Files}} items
-            </span>
+    {{if .IsFile}}
+        <div class="card shadow-sm code-container">
+            <div class="card-header bg-body-tertiary d-flex justify-content-between align-items-center border-bottom">
+                <span class="font-monospace fw-bold">{{.FileName}}</span>
+                <div class="btn-group">
+                    <button class="btn btn-sm btn-outline-primary" onclick="copyToClipboard()">Copy</button>
+                    <a href="?raw=true" class="btn btn-sm btn-outline-primary">Raw</a>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <pre class="line-numbers"><code class="language-{{if .Extension}}{{.Extension}}{{else}}clike{{end}}">{{.Content}}</code></pre>
+            </div>
         </div>
-        <div class="list-group list-group-flush">
-            {{if $.CurrentPath}}
-                <a href=".." class="list-group-item list-group-item-action py-2 text-primary bg-body">
-                    📁 .. <span class="text-body-secondary italic small">(Go back)</span>
+
+    {{else if .Files}}
+        <div class="card shadow-sm border mb-4">
+            <div class="card-header bg-body-tertiary d-flex justify-content-between align-items-center py-2">
+                <span class="small text-body-secondary">Last commit: <strong class="text-body">{{.LastCommit}}</strong></span>
+            </div>
+            <div class="list-group list-group-flush">
+                {{range .Files}}
+                <a href="{{.Name}}" class="list-group-item list-group-item-action d-flex align-items-center">
+                    <span class="me-3">{{if .IsURL}}📁{{else}}📄{{end}}</span>
+                    <span class="flex-grow-1">{{.Name}}</span>
+                    {{if not .IsURL}}<span class="badge rounded-pill bg-light text-dark border small">{{.Size}} bytes</span>{{end}}
                 </a>
-            {{end}}
-            {{range .Files}}
-            <a href="/view/{{$.Owner}}/{{$.RepoName}}/{{$.CurrentBranch}}/{{if $.CurrentPath}}{{$.CurrentPath}}/{{end}}{{.Name}}" 
-                class="list-group-item list-group-item-action d-flex align-items-center py-3 bg-body">
-                <span class="me-3 fs-5">{{if .Mode.IsFile}} 📄 {{else}} 📁 {{end}}</span>
-                <span class="flex-grow-1 text-body">{{.Name}}</span>
-                <span class="text-body-secondary small d-none d-md-inline">View details</span>
-            </a>
-            {{end}}
+                {{end}}
+            </div>
         </div>
-    </div>
 
     {{else}}
-    <div class="row">
-        <div class="col-12">
-            <div class="mb-4">
-                <h3 class="fw-bold text-body">Quick setup</h3>
-                <p class="text-body-secondary">Push an existing repository or create a new one from the command line.</p>
-            </div>
-
-            <div class="card shadow-sm border mb-4">
-                <div class="card-header bg-body-tertiary py-3">
-                    <h5 class="mb-0 fw-semibold text-primary">Create a new repository</h5>
+        <div class="row">
+            <div class="col-12">
+                <div class="mb-4">
+                    <h3 class="fw-bold text-body">Quick setup</h3>
+                    <p class="text-body-secondary">Push an existing repository or create a new one from the command line.</p>
                 </div>
-                <div class="card-body setup-code p-0">
-                    <pre class="p-3 mb-0"><code>echo "# {{.RepoName}}" >> README.md
+
+                <div class="card shadow-sm border mb-4">
+                    <div class="card-header bg-body-tertiary py-3">
+                        <h5 class="mb-0 fw-semibold text-primary">Create a new repository</h5>
+                    </div>
+                    <div class="card-body setup-code p-0">
+                        <pre class="p-3 mb-0"><code>echo "# {{.RepoName}}" >> README.md
 git init
 git add README.md
 git commit -m "first commit"
 git branch -M main
 git remote add origin ssh://git@{{.SSHAddr}}/{{.Owner}}/{{.RepoName}}.git
 git push -u origin main</code></pre>
+                    </div>
                 </div>
-            </div>
 
-            <div class="card shadow-sm border">
-                <div class="card-header bg-body-tertiary py-3">
-                    <h5 class="mb-0 fw-semibold text-primary">Push an existing repository</h5>
-                </div>
-                <div class="card-body setup-code p-0">
-                    <pre class="p-3 mb-0"><code>git remote add origin ssh://git@{{.SSHAddr}}/{{.Owner}}/{{.RepoName}}.git
+                <div class="card shadow-sm border">
+                    <div class="card-header bg-body-tertiary py-3">
+                        <h5 class="mb-0 fw-semibold text-primary">Push an existing repository</h5>
+                    </div>
+                    <div class="card-body setup-code p-0">
+                        <pre class="p-3 mb-0"><code>git remote add origin ssh://git@{{.SSHAddr}}/{{.Owner}}/{{.RepoName}}.git
 git branch -M main
 git push -u origin main</code></pre>
+                    </div>
                 </div>
             </div>
         </div>
-    </div>
     {{end}}
 </div>
+
+{{if .IsFile}}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+<script>
+    const updatePrismTheme = () => {
+        const isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+        document.getElementById('prism-dark').disabled = !isDark;
+        document.getElementById('prism-light').disabled = isDark;
+    };
+
+    const observer = new MutationObserver(updatePrismTheme);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-bs-theme'] });
+    updatePrismTheme();
+
+    function copyToClipboard() {
+        const code = document.querySelector('code').innerText;
+        navigator.clipboard.writeText(code).then(() => {
+            alert("Copied to clipboard!");
+        });
+    }
+</script>
+{{end}}
 
 {{template "base/footer.tmpl" .}}
