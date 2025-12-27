@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/zip"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
@@ -99,7 +100,7 @@ func (m *RepoManager) getAuthenticatedUser(r *http.Request) (string, error) {
 	return m.Store.GetUserByToken(cookie.Value)
 }
 
-func (m *RepoManager) CreateNewRepository(username string, repoName string) error {
+func (m *RepoManager) CreateNewRepository(username string, repoName string, isPrivate bool) error {
 	// 1. Create the repository on disk (Bare Repo)
 	repoPath := filepath.Join(m.BaseDir, username, repoName+".git")
 	_, err := git.PlainInit(repoPath, true)
@@ -108,11 +109,15 @@ func (m *RepoManager) CreateNewRepository(username string, repoName string) erro
 	}
 
 	// 2. Insert metadata into SQLite
+	priv := 0
+	if isPrivate {
+		priv = 1
+	}
 	query := `
-        INSERT INTO repositories (user_id, name, description)
-        VALUES ((SELECT id FROM users WHERE username = ? COLLATE NOCASE), ?, ?)`
+        INSERT INTO repositories (user_id, name, description, is_private)
+        VALUES ((SELECT id FROM users WHERE username = ? COLLATE NOCASE), ?, ?, ?)`
 
-	_, err = m.Store.db.Exec(query, username, repoName, "No description provided.")
+	_, err = m.Store.db.Exec(query, username, repoName, "No description provided.", priv)
 	if err != nil {
 		// If DB fails, you might want to cleanup the folder,
 		// but often we just log the error.
@@ -131,8 +136,9 @@ func (m *RepoManager) HandleCreateRepo(w http.ResponseWriter, r *http.Request) {
 	// Get username from session (logic varies based on your auth)
 	username := m.GetUsernameFromSession(r)
 	repoName := r.FormValue("name")
+	isPrivate := r.FormValue("is_private") == "1"
 
-	err := m.CreateNewRepository(username, repoName)
+	err := m.CreateNewRepository(username, repoName, isPrivate)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -266,6 +272,14 @@ func (m *RepoManager) HandleRepoView(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *RepoManager) HandleRepoNavigation(w http.ResponseWriter, r *http.Request, username, repo, branchName, path string) {
+
+	// Enforce privacy: if the repo is private and the viewer is not the owner, hide it.
+	viewer, _ := m.Store.GetUserByTokenFromRequest(r)
+	if isPriv, err := m.IsRepoPrivate(username, repo); err == nil && isPriv && viewer != username {
+		http.Error(w, "Repository not found", 404)
+		return
+	}
+
 	repoPath := filepath.Join(m.BaseDir, username, repo+".git")
 	gitRepo, err := git.PlainOpen(repoPath)
 	if err != nil {
@@ -308,12 +322,22 @@ func (m *RepoManager) HandleRepoNavigation(w http.ResponseWriter, r *http.Reques
 	commit, _ := gitRepo.CommitObject(branchRef.Hash())
 	tree, _ := commit.Tree()
 
+	// Prepare base data
+	isFav := false
+	// viewer was already retrieved earlier; reuse it
+	if viewer != "" {
+		if fav, err := m.IsFavorite(viewer, username, repo); err == nil && fav {
+			isFav = true
+		}
+	}
 	data := map[string]interface{}{
 		"Owner":         username,
 		"RepoName":      repo,
 		"CurrentBranch": branchName,
 		"Branches":      branches,
 		"DownloadCount": m.GetDownloadCount(username, repo), // Retrieve count here
+		"StarCount":     m.GetStarCount(username, repo),
+		"IsFavorite":    isFav,
 		"CurrentPath":   path,
 		"SSHAddr":       r.Host,
 		"LastCommit": map[string]interface{}{
@@ -425,6 +449,13 @@ func (m *RepoManager) HandleDownloadZip(w http.ResponseWriter, r *http.Request) 
 	repo := parts[1]
 	branchName := parts[2]
 
+	// Enforce privacy: only owner (or authorized users) may download private repos
+	viewer, _ := m.Store.GetUserByTokenFromRequest(r)
+	if isPriv, err := m.IsRepoPrivate(username, repo); err == nil && isPriv && viewer != username {
+		http.Error(w, "Forbidden", 403)
+		return
+	}
+
 	// FIX: Multi-tiered lookup to find the repo on disk
 	possiblePaths := []string{
 		filepath.Join(m.BaseDir, username, repo+".git"), // Bare repo
@@ -455,6 +486,11 @@ func (m *RepoManager) HandleDownloadZip(w http.ResponseWriter, r *http.Request) 
 	if branchRef == nil {
 		http.Error(w, "Branch not found", 404)
 		return
+	}
+
+	// Increment the download counter for analytics (best-effort)
+	if err := m.IncrementDownloadCount(username, repo); err != nil {
+		log.Printf("ERROR: incrementing download count for %s/%s: %v", username, repo, err)
 	}
 
 	// 3. Prepare Zip Headers
@@ -523,4 +559,232 @@ func (m *RepoManager) GetDownloadCount(username, repoName string) int {
 		return 0 // Return 0 if not found or error occurs
 	}
 	return count
+}
+
+// IsRepoPrivate checks whether the repository is marked private. Returns (true, nil) if private.
+func (m *RepoManager) IsRepoPrivate(username, repoName string) (bool, error) {
+	var isPrivate int
+	query := `
+        SELECT is_private
+        FROM repositories
+        WHERE name = ? AND user_id = (SELECT id FROM users WHERE username = ? COLLATE NOCASE)`
+
+	err := m.Store.db.QueryRow(query, repoName, username).Scan(&isPrivate)
+	if err != nil {
+		return false, err
+	}
+	return isPrivate == 1, nil
+}
+
+// GetRepoMeta returns download_count, created_at, is_private and star_count for a repo
+func (m *RepoManager) GetRepoMeta(username, repoName string) (int, string, bool, int, error) {
+	var downloadCount int
+	var createdAt string
+	var isPrivate int
+	var starCount int
+	query := `
+        SELECT download_count, created_at, is_private, COALESCE(star_count, 0)
+        FROM repositories
+        WHERE name = ? AND user_id = (SELECT id FROM users WHERE username = ? COLLATE NOCASE)`
+
+	err := m.Store.db.QueryRow(query, repoName, username).Scan(&downloadCount, &createdAt, &isPrivate, &starCount)
+	if err != nil {
+		return 0, "", false, 0, err
+	}
+	return downloadCount, createdAt, isPrivate == 1, starCount, nil
+}
+
+// GetStarCount returns current star count for a repo (0 if missing)
+func (m *RepoManager) GetStarCount(username, repoName string) int {
+	var count int
+	query := `SELECT COALESCE(star_count,0) FROM repositories WHERE name = ? AND user_id = (SELECT id FROM users WHERE username = ? COLLATE NOCASE)`
+	if err := m.Store.db.QueryRow(query, repoName, username).Scan(&count); err != nil {
+		return 0
+	}
+	return count
+}
+
+// Favorites management
+func (m *RepoManager) AddFavorite(user, owner, repoName string) error {
+	query := `
+	INSERT OR IGNORE INTO favorites (user_id, repo_id) VALUES (
+	    (SELECT id FROM users WHERE username = ? COLLATE NOCASE),
+	    (SELECT id FROM repositories WHERE name = ? AND user_id = (SELECT id FROM users WHERE username = ? COLLATE NOCASE))
+	)`
+	res, err := m.Store.db.Exec(query, user, repoName, owner)
+	if err != nil {
+		return err
+	}
+	if ra, _ := res.RowsAffected(); ra > 0 {
+		// We successfully added the favorite — bump the repo's star_count
+		upd := `UPDATE repositories SET star_count = COALESCE(star_count,0) + 1 WHERE name = ? AND user_id = (SELECT id FROM users WHERE username = ? COLLATE NOCASE)`
+		_, _ = m.Store.db.Exec(upd, repoName, owner)
+	}
+	return nil
+}
+
+func (m *RepoManager) RemoveFavorite(user, owner, repoName string) error {
+	query := `
+	DELETE FROM favorites WHERE user_id = (SELECT id FROM users WHERE username = ? COLLATE NOCASE) AND repo_id = (
+	    SELECT id FROM repositories WHERE name = ? AND user_id = (SELECT id FROM users WHERE username = ? COLLATE NOCASE)
+	)`
+	res, err := m.Store.db.Exec(query, user, repoName, owner)
+	if err != nil {
+		return err
+	}
+	if ra, _ := res.RowsAffected(); ra > 0 {
+		// A favorite was removed — decrement star_count (not below 0)
+		upd := `UPDATE repositories SET star_count = CASE WHEN COALESCE(star_count,0) > 0 THEN star_count - 1 ELSE 0 END WHERE name = ? AND user_id = (SELECT id FROM users WHERE username = ? COLLATE NOCASE)`
+		_, _ = m.Store.db.Exec(upd, repoName, owner)
+	}
+	return nil
+}
+
+func (m *RepoManager) IsFavorite(user, owner, repoName string) (bool, error) {
+	var exists int
+	query := `
+	SELECT EXISTS(SELECT 1 FROM favorites WHERE user_id = (SELECT id FROM users WHERE username = ? COLLATE NOCASE) AND repo_id = (
+	    SELECT id FROM repositories WHERE name = ? AND user_id = (SELECT id FROM users WHERE username = ? COLLATE NOCASE)
+	))`
+	if err := m.Store.db.QueryRow(query, user, repoName, owner).Scan(&exists); err != nil {
+		return false, err
+	}
+	return exists == 1, nil
+}
+
+func (m *RepoManager) GetFavoritesForUser(username string) ([]map[string]interface{}, error) {
+	query := `
+	SELECT r.name, u.username, r.download_count, COALESCE(r.star_count,0), r.is_private, r.created_at
+	FROM favorites f
+	JOIN repositories r ON f.repo_id = r.id
+	JOIN users u ON r.user_id = u.id
+	WHERE f.user_id = (SELECT id FROM users WHERE username = ? COLLATE NOCASE)
+	ORDER BY f.created_at DESC`
+
+	rows, err := m.Store.db.Query(query, username)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var res []map[string]interface{}
+	for rows.Next() {
+		var name string
+		var owner string
+		var downloadCount int
+		var starCount int
+		var isPrivate int
+		var createdAt string
+		if err := rows.Scan(&name, &owner, &downloadCount, &starCount, &isPrivate, &createdAt); err != nil {
+			continue
+		}
+		res = append(res, map[string]interface{}{
+			"Name":          name,
+			"Owner":         owner,
+			"DownloadCount": downloadCount,
+			"StarCount":     starCount,
+			"IsPrivate":     isPrivate == 1,
+			"CreatedAt":     createdAt,
+		})
+	}
+	return res, nil
+}
+
+// HTTP handler: toggle favorite (POST)
+func (m *RepoManager) HandleToggleFavorite(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
+	user, err := m.Store.GetUserByTokenFromRequest(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", 401)
+		return
+	}
+	owner := r.FormValue("owner")
+	repo := r.FormValue("repo")
+	if owner == "" || repo == "" {
+		http.Error(w, "Missing parameters", 400)
+		return
+	}
+	fav, err := m.IsFavorite(user, owner, repo)
+	if err != nil {
+		log.Printf("ERROR checking favorite: %v", err)
+		http.Error(w, "Server error", 500)
+		return
+	}
+	if fav {
+		if err := m.RemoveFavorite(user, owner, repo); err != nil {
+			log.Printf("ERROR removing favorite: %v", err)
+			http.Error(w, "Server error", 500)
+			return
+		}
+		fav = false
+	} else {
+		if err := m.AddFavorite(user, owner, repo); err != nil {
+			log.Printf("ERROR adding favorite: %v", err)
+			http.Error(w, "Server error", 500)
+			return
+		}
+		fav = true
+	}
+
+	// Return current favorited state and updated star count
+	sc := m.GetStarCount(owner, repo)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"favorited": fav, "star_count": sc})
+}
+
+// HTTP handler: add favorite (POST)
+func (m *RepoManager) HandleAddFavorite(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
+	user, err := m.Store.GetUserByTokenFromRequest(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", 401)
+		return
+	}
+	owner := r.FormValue("owner")
+	repo := r.FormValue("repo")
+	if owner == "" || repo == "" {
+		http.Error(w, "Missing parameters", 400)
+		return
+	}
+	if err := m.AddFavorite(user, owner, repo); err != nil {
+		log.Printf("ERROR adding favorite: %v", err)
+		http.Error(w, "Server error", 500)
+		return
+	}
+	sc := m.GetStarCount(owner, repo)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"favorited": true, "star_count": sc})
+}
+
+// HTTP handler: remove favorite (POST)
+func (m *RepoManager) HandleRemoveFavorite(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
+	user, err := m.Store.GetUserByTokenFromRequest(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", 401)
+		return
+	}
+	owner := r.FormValue("owner")
+	repo := r.FormValue("repo")
+	if owner == "" || repo == "" {
+		http.Error(w, "Missing parameters", 400)
+		return
+	}
+	if err := m.RemoveFavorite(user, owner, repo); err != nil {
+		log.Printf("ERROR removing favorite: %v", err)
+		http.Error(w, "Server error", 500)
+		return
+	}
+	sc := m.GetStarCount(owner, repo)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"favorited": false, "star_count": sc})
 }

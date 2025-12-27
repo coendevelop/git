@@ -22,41 +22,135 @@
 
 <div class="container py-5">
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2 class="text-body fw-bold">Public Repositories</h2>
-        {{if .IsLoggedIn}}
-            <a class="btn btn-outline-primary" href="/view/{{.Username}}">My Repositories</a>
-        {{else}}
-            <p></p>
-        {{end}}
-    </div>
-
-    <div class="row">
-        {{range .Repos}}
-        <div class="col-md-4 mb-4">
-            <div class="card shadow-sm h-100 repo-card hover-shadow bg-body-tertiary">
-                <div class="card-body d-flex flex-column">
-                    <h5 class="card-title fw-bold">
-                        <a href="/view/{{.Owner}}/{{.Name}}" class="text-decoration-none text-primary">
-                            {{.Name}}
-                        </a>
-                    </h5>
-                    <p class="card-text text-body-secondary small mb-4">
-                        Owned by: <span class="text-body fw-semibold">{{.Owner}}</span>
-                    </p>
-                    <div class="mt-auto">
-                        <a href="/view/{{.Owner}}/{{.Name}}" class="btn btn-sm btn-outline-secondary w-100">
-                            Browse Code
-                        </a>
-                    </div>
-                </div>
+        <h2 class="text-body fw-bold">Dashboard</h2>
+        <div class="d-flex align-items-center gap-3">
+            <div class="d-flex align-items-center">
+                <label for="sortSelect" class="small text-body-secondary me-2 mb-0">Sort:</label>
+                <select id="sortSelect" class="form-select form-select-sm">
+                    <option value="recent" {{if eq .SortKey "recent"}}selected{{end}}>Recent</option>
+                    <option value="downloads" {{if eq .SortKey "downloads"}}selected{{end}}>Most downloads</option>
+                    <option value="alpha" {{if eq .SortKey "alpha"}}selected{{end}}>A → Z</option>
+                </select>
             </div>
         </div>
-        {{else}}
-        <div class="col-12 text-center py-5 border rounded bg-body-tertiary">
-            <p class="text-body-secondary mb-0">No repositories have been created yet.</p>
+    </div>
+
+    <div>
+        <ul class="nav nav-pills mb-4" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="tab-all-btn" data-bs-toggle="pill" data-bs-target="#tabAll" type="button" role="tab">All Repositories</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-mine-btn" data-bs-toggle="pill" data-bs-target="#tabMine" type="button" role="tab">My Repositories</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-fav-btn" data-bs-toggle="pill" data-bs-target="#tabFav" type="button" role="tab">Favorites <span class="badge bg-secondary ms-2 small">Soon</span></button>
+            </li>
+        </ul>
+
+
+
+        <div class="tab-content repo-list">
+            <div class="tab-pane fade show active" id="tabAll" role="tabpanel">
+                {{if .AllRepos}}
+                <div class="list-group">
+                    {{range .AllRepos}}
+                    <div class="list-group-item d-flex align-items-center justify-content-between">
+                        <div>
+                            <a href="/view/{{.Owner}}/{{.Name}}" class="fw-semibold text-decoration-none text-primary">{{.Name}}</a>
+                            <div class="meta text-secondary small fw-semibold">Owned by <span class="fw-semibold">{{.Owner}}</span> {{if .IsPrivate}}<span class="badge bg-warning text-dark ms-2">Private</span>{{end}}</div>
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            <button class="btn btn-sm btn-primary star-btn shadow-sm fw-bold px-2 rounded-pill d-inline-flex align-items-center gap-1" data-owner="{{.Owner}}" data-repo="{{.Name}}" aria-label="Toggle favorite" aria-pressed="{{if .IsFavorite}}true{{else}}false{{end}}">
+                                <span class="star-glyph fs-5">{{if .IsFavorite}}★{{else}}☆{{end}}</span>
+                                <span class="small ms-1 star-count">{{.StarCount}}</span>
+                            </button>
+                            <a href="/download/view/{{.Owner}}/{{.Name}}/HEAD" class="btn btn-sm btn-primary shadow-sm fw-bold px-2 rounded-pill d-inline-flex align-items-center gap-1" title="{{.DownloadCount}} downloads" role="button" aria-label="Download {{.Name}}">
+                                <span class="fs-5">⬇</span>
+                                <span class="small ms-1">{{.DownloadCount}}</span>
+                            </a>
+                            <a href="/view/{{.Owner}}/{{.Name}}" class="btn btn-sm btn-outline-secondary">Browse</a>
+                        </div>
+                    </div>
+                    {{end}}
+                </div>
+                {{else}}
+                <div class="border rounded p-4 text-center bg-body-tertiary">No repositories available.</div>
+                {{end}}
+            </div>
+
+            <div class="tab-pane fade" id="tabMine" role="tabpanel">
+                {{if .MyRepos}}
+                <div class="list-group">
+                    {{range .MyRepos}}
+                    <div class="list-group-item d-flex align-items-center justify-content-between">
+                        <div>
+                            <a href="/view/{{.Owner}}/{{.Name}}" class="fw-semibold text-decoration-none text-primary">{{.Name}}</a>
+                            <div class="meta text-secondary small fw-semibold">{{if .IsPrivate}}<span class="badge bg-warning text-dark">Private</span>{{end}}</div>
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            <button class="btn btn-sm btn-primary star-btn shadow-sm fw-bold px-2 rounded-pill d-inline-flex align-items-center gap-1" data-owner="{{.Owner}}" data-repo="{{.Name}}" aria-label="Toggle favorite" aria-pressed="{{if .IsFavorite}}true{{else}}false{{end}}">
+                                <span class="star-glyph fs-5">{{if .IsFavorite}}★{{else}}☆{{end}}</span>
+                                <span class="small ms-1 star-count">{{.StarCount}}</span>
+                            </button>
+                            <a href="/download/view/{{.Owner}}/{{.Name}}/HEAD" class="btn btn-sm btn-primary shadow-sm fw-bold px-2 rounded-pill d-inline-flex align-items-center gap-1" title="{{.DownloadCount}} downloads" role="button" aria-label="Download {{.Name}}">
+                                <span class="fs-5">⬇</span>
+                                <span class="small ms-1">{{.DownloadCount}}</span>
+                            </a>
+                            <a href="/view/{{.Owner}}/{{.Name}}" class="btn btn-sm btn-outline-secondary">Browse</a>
+                        </div>
+                    </div>
+                    {{end}}
+                </div>
+                {{else}}
+                <div class="border rounded p-4 text-center bg-body-tertiary">You have no repositories yet.</div>
+                {{end}}
+            </div>
+
+            <div class="tab-pane fade" id="tabFav" role="tabpanel">
+                {{if .Favorites}}
+                <div class="list-group">
+                    {{range .Favorites}}
+                    <div class="list-group-item d-flex align-items-center justify-content-between">
+                        <div>
+                            <a href="/view/{{.Owner}}/{{.Name}}" class="fw-semibold text-decoration-none text-primary">{{.Name}}</a>
+                            <div class="meta text-secondary small fw-semibold">Owned by <span class="fw-semibold">{{.Owner}}</span> {{if .IsPrivate}}<span class="badge bg-warning text-dark ms-2">Private</span>{{end}}</div>
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            <button class="btn btn-sm btn-primary star-btn shadow-sm fw-bold px-2 rounded-pill d-inline-flex align-items-center gap-1" data-owner="{{.Owner}}" data-repo="{{.Name}}" aria-label="Toggle favorite" aria-pressed="{{if .IsFavorite}}true{{else}}false{{end}}">
+                                <span class="star-glyph fs-5">{{if .IsFavorite}}★{{else}}☆{{end}}</span>
+                                <span class="small ms-1 star-count">{{.StarCount}}</span>
+                            </button>
+                            <a href="/download/view/{{.Owner}}/{{.Name}}/HEAD" class="btn btn-sm btn-primary shadow-sm fw-bold px-2 rounded-pill d-inline-flex align-items-center gap-1" title="{{.DownloadCount}} downloads" role="button" aria-label="Download {{.Name}}">
+                                <span class="fs-5">⬇</span>
+                                <span class="small ms-1">{{.DownloadCount}}</span>
+                            </a>
+                            <a href="/view/{{.Owner}}/{{.Name}}" class="btn btn-sm btn-outline-secondary">Browse</a>
+                        </div>
+                    </div>
+                    {{end}}
+                </div>
+                {{else}}
+                <div class="border rounded p-4 text-center bg-body-tertiary">You haven't favorited any repositories yet.</div>
+                {{end}}
+            </div>
         </div>
-        {{end}}
     </div>
 </div>
+
+<script>
+    // Sorting control: change URL search param while preserving hash (active tab)
+    document.getElementById('sortSelect').addEventListener('change', function (e) {
+        const val = e.target.value;
+        const hash = location.hash || '#tabAll';
+        // Keep the selected tab and change the sort param
+        const searchParams = new URLSearchParams(window.location.search);
+        searchParams.set('sort', val);
+        window.location.search = searchParams.toString();
+        window.location.hash = hash;
+    });
+
+    // Favorite handling is handled globally in the footer so it works across pages
+</script>
 
 {{template "base/footer.tmpl" .}}

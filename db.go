@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS repositories (
     description TEXT,
     is_private INTEGER DEFAULT 0, -- 0 for public, 1 for private
     download_count INTEGER DEFAULT 0,
+    star_count INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -57,11 +58,22 @@ CREATE TABLE IF NOT EXISTS sessions (
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+-- Favorites Table: User-starred repositories
+CREATE TABLE IF NOT EXISTS favorites (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    repo_id INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY(repo_id) REFERENCES repositories(id) ON DELETE CASCADE,
+    UNIQUE(user_id, repo_id)
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
 CREATE INDEX IF NOT EXISTS idx_repos_owner_name ON repositories(user_id, name);
-`
+CREATE INDEX IF NOT EXISTS idx_favorites_user ON favorites(user_id);`
 
 func NewAuthStore(dbPath string) (*AuthStore, error) {
 	// 1. Ensure the directory for the DB exists
@@ -77,7 +89,45 @@ func NewAuthStore(dbPath string) (*AuthStore, error) {
 	}
 
 	_, err = db.Exec(initSchema)
-	return &AuthStore{db: db}, err
+	if err != nil {
+		return nil, err
+	}
+
+	// Migration: ensure older databases get the new columns (is_private, star_count)
+	hasIsPrivate := false
+	hasStarCount := false
+	rows, err := db.Query("PRAGMA table_info(repositories);")
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var cid int
+			var name string
+			var ctype string
+			var notnull int
+			var dflt sql.NullString
+			var pk int
+			if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err == nil {
+				if name == "is_private" {
+					hasIsPrivate = true
+				}
+				if name == "star_count" {
+					hasStarCount = true
+				}
+			}
+		}
+		if !hasIsPrivate {
+			if _, err := db.Exec("ALTER TABLE repositories ADD COLUMN is_private INTEGER DEFAULT 0"); err != nil {
+				return nil, fmt.Errorf("failed migration add is_private: %w", err)
+			}
+		}
+		if !hasStarCount {
+			if _, err := db.Exec("ALTER TABLE repositories ADD COLUMN star_count INTEGER DEFAULT 0"); err != nil {
+				return nil, fmt.Errorf("failed migration add star_count: %w", err)
+			}
+		}
+	}
+
+	return &AuthStore{db: db}, nil
 }
 
 func (s *AuthStore) GetUserByKey(incomingKey ssh.PublicKey) (string, error) {

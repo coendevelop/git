@@ -37,9 +37,14 @@ func main() {
 	http.HandleFunc("/", mgr.HandleDashboard) // Todo: show repos/users
 	// Example URL: /view/my-project/subdir/main.go
 	// Note the trailing slash! This allows /view/user/repo to work.
-	http.HandleFunc("/view/{path...}", mgr.HandleView)
-	http.HandleFunc("/download/view/{path...}", mgr.HandleDownloadZip)
+	// Use prefix-style patterns so the ServeMux correctly matches subpaths.
+	http.HandleFunc("/view/", mgr.HandleView)
+	http.HandleFunc("/download/view/", mgr.HandleDownloadZip)
 	http.HandleFunc("/create-repo", mgr.HandleCreateRepo)
+	// Favorites API
+	http.HandleFunc("/favorite/toggle", mgr.HandleToggleFavorite)
+	http.HandleFunc("/favorite/add", mgr.HandleAddFavorite)
+	http.HandleFunc("/favorite/remove", mgr.HandleRemoveFavorite)
 
 	// Start Servers
 	go func() {

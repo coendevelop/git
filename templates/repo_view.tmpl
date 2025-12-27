@@ -70,21 +70,15 @@
                     {{end}}
                 </ul>
             </div>
-            <style>
-                .download-badge {
-                    font-size: 0.75rem;
-                    background-color: var(--bs-body-tertiary-bg);
-                    border: 1px solid var(--bs-border-color);
-                    color: var(--bs-body-secondary-color);
-                }
-            </style>
             <div class="d-flex align-items-center gap-2">
-                <a href="/download/view/{{$.Owner}}/{{$.RepoName}}/{{$.CurrentBranch}}" class="btn btn-sm btn-primary shadow-sm">
-                    📦 Download ZIP
+                <button class="btn btn-sm btn-primary star-btn shadow-sm fw-bold px-2 rounded-pill d-inline-flex align-items-center gap-1" data-owner="{{.Owner}}" data-repo="{{.RepoName}}" aria-label="Toggle favorite" aria-pressed="{{if .IsFavorite}}true{{else}}false{{end}}">
+                    <span class="star-glyph fs-5">{{if .IsFavorite}}★{{else}}☆{{end}}</span>
+                    <span class="small ms-1 star-count">{{.StarCount}}</span>
+                </button>
+                <a href="/download/view/{{$.Owner}}/{{$.RepoName}}/{{$.CurrentBranch}}" class="btn btn-sm btn-primary shadow-sm fw-bold px-2 rounded-pill d-inline-flex align-items-center gap-1" role="button" aria-label="Download {{$.RepoName}} as zip" title="{{.DownloadCount}} downloads">
+                    <span class="d-inline-block fs-5">📦</span>
+                    <span class="small ms-1 d-none d-sm-inline">{{.DownloadCount}}</span>
                 </a>
-                <span class="badge download-badge rounded-pill px-2 py-1">
-                    {{.DownloadCount}} downloads
-                </span>
             </div>
         </div>
         {{end}}

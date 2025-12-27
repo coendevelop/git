@@ -1,5 +1,46 @@
 {{/**/}}
     <footer>
     </footer>
+    <script>
+    // Global favorite handling - delegated so it works on any page
+    document.addEventListener('click', async (ev) => {
+        const btn = ev.target.closest && ev.target.closest('.star-btn');
+        if (!btn) return;
+        ev.preventDefault();
+        const owner = btn.getAttribute('data-owner');
+        const repo = btn.getAttribute('data-repo');
+        const isFavorited = btn.getAttribute('aria-pressed') === 'true';
+        btn.disabled = true;
+        try {
+            const form = new FormData();
+            form.append('owner', owner);
+            form.append('repo', repo);
+            const url = isFavorited ? '/favorite/remove' : '/favorite/add';
+            const resp = await fetch(url, { method: 'POST', body: form, credentials: 'same-origin' });
+            if (resp.ok) {
+                const j = await resp.json();
+                btn.setAttribute('aria-pressed', j.favorited ? 'true' : 'false');
+                const glyph = btn.querySelector('.star-glyph');
+                const countEl = btn.querySelector('.star-count');
+                if (glyph) glyph.textContent = j.favorited ? '★' : '☆';
+                if (countEl && typeof j.star_count !== 'undefined') countEl.textContent = j.star_count;
+                // If in the Favorites tab and we removed the favorite, optionally remove the item from the list
+                if (isFavorited && window.location.hash === '#tabFav') {
+                    const item = btn.closest('.list-group-item');
+                    if (item) item.remove();
+                }
+            } else if (resp.status == 401) {
+                // Not logged in - redirect to auth
+                window.location.href = '/auth';
+            } else {
+                console.error('Favorite action failed', resp.status);
+            }
+        } catch (err) {
+            console.error('Favorite action error', err);
+        } finally {
+            btn.disabled = false;
+        }
+    });
+    </script>
     </body>
 </html>

@@ -4,7 +4,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 )
 
 // Define the data structure for our HTML template
@@ -19,10 +21,17 @@ func (m *RepoManager) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 	isLoggedIn := err == nil
 
 	type RepoInfo struct {
-		Name  string
-		Owner string
+		Name          string
+		Owner         string
+		DownloadCount int
+		StarCount     int
+		IsPrivate     bool
+		CreatedAt     time.Time
+		IsFavorite    bool
 	}
 	var allRepos []RepoInfo
+	var myRepos []RepoInfo
+	var favorites []RepoInfo
 
 	// 2. Fetch ALL folders from the disk (scanning all user directories)
 	userDirs, err := os.ReadDir(m.BaseDir)
@@ -36,21 +45,97 @@ func (m *RepoManager) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 				repos, _ := os.ReadDir(userPath)
 				for _, rDir := range repos {
 					if rDir.IsDir() && strings.HasSuffix(rDir.Name(), ".git") {
-						allRepos = append(allRepos, RepoInfo{
-							Name:  strings.TrimSuffix(rDir.Name(), ".git"),
-							Owner: ownerName,
-						})
+						repoName := strings.TrimSuffix(rDir.Name(), ".git")
+
+						// Skip private repos for users who are not the owner
+						if isPriv, err := m.IsRepoPrivate(ownerName, repoName); err == nil && isPriv && username != ownerName {
+							continue
+						}
+
+						// Fetch metadata from DB
+						count, createdAtStr, isPrivMeta, starCount, _ := m.GetRepoMeta(ownerName, repoName)
+						createdAt := time.Now()
+						if t, err := time.Parse("2006-01-02 15:04:05", createdAtStr); err == nil {
+							createdAt = t
+						}
+
+						isFav := false
+						if username != "" {
+							if fav, err := m.IsFavorite(username, ownerName, repoName); err == nil && fav {
+								isFav = true
+							}
+						}
+
+						repoInfo := RepoInfo{
+							Name:          repoName,
+							Owner:         ownerName,
+							DownloadCount: count,
+							StarCount:     starCount,
+							IsPrivate:     isPrivMeta,
+							CreatedAt:     createdAt,
+							IsFavorite:    isFav,
+						}
+						if username == ownerName {
+							myRepos = append(myRepos, repoInfo)
+						}
 					}
 				}
 			}
 		}
 	}
 
+	// Build favorites list for the logged-in user
+	if username != "" {
+		if favs, err := m.GetFavoritesForUser(username); err == nil {
+			for _, f := range favs {
+				createdAt := time.Now()
+				if s, ok := f["CreatedAt"].(string); ok {
+					if t, err := time.Parse("2006-01-02 15:04:05", s); err == nil {
+						createdAt = t
+					}
+				}
+				favorites = append(favorites, RepoInfo{
+					Name:          f["Name"].(string),
+					Owner:         f["Owner"].(string),
+					DownloadCount: f["DownloadCount"].(int),
+					StarCount:     f["StarCount"].(int),
+					IsPrivate:     f["IsPrivate"].(bool),
+					CreatedAt:     createdAt,
+					IsFavorite:    true,
+				})
+			}
+		}
+	}
+
+	// Sorting: support sort=downloads|recent|alpha
+	sortKey := r.URL.Query().Get("sort")
+	if sortKey == "" {
+		sortKey = "recent"
+	}
+
+	sortRepos := func(list []RepoInfo) {
+		switch sortKey {
+		case "downloads":
+			sort.Slice(list, func(i, j int) bool { return list[i].DownloadCount > list[j].DownloadCount })
+		case "alpha":
+			sort.Slice(list, func(i, j int) bool { return list[i].Name < list[j].Name })
+		default: // recent
+			sort.Slice(list, func(i, j int) bool { return list[i].CreatedAt.After(list[j].CreatedAt) })
+		}
+	}
+
+	sortRepos(allRepos)
+	sortRepos(myRepos)
+	// Favorites already returned in recent order from DB
+
 	// 3. Prepare data for the template
 	data := map[string]interface{}{
 		"Username":   username,
 		"IsLoggedIn": isLoggedIn,
-		"Repos":      allRepos,
+		"AllRepos":   allRepos,
+		"MyRepos":    myRepos,
+		"Favorites":  favorites,
+		"SortKey":    sortKey,
 	}
 
 	m.renderTemplate(w, "dashboard.tmpl", data)
