@@ -1,5 +1,5 @@
-{{/* Base navbar: top navigation bar and the 'Create Repository' modal.
-   Expects context fields like .IsLoggedIn and .Username. */}}
+{{/* Base navbar: top navigation bar and all associated modals.
+   Expects context fields like .IsLoggedIn, .Username, and .Profile. */}}
 <nav class="navbar navbar-expand-lg bg-body-tertiary border-bottom sticky-top shadow-sm mb-5">
     <div class="container">
         <a class="navbar-brand text-primary" href="/">
@@ -7,9 +7,19 @@
         </a>
 
         <div class="d-flex align-items-center ms-auto">
-            <span class="navbar-text me-3 d-none d-md-inline text-body">
-                {{if $.IsLoggedIn}}Welcome, <strong>{{ .Username }}</strong>{{end}}
-            </span>
+            {{if $.IsLoggedIn}}
+            <div class="d-flex align-items-center me-3">
+                <img src="https://ui-avatars.com/api/?name={{.Username}}&background=random" 
+                     class="rounded-circle me-2 shadow-sm border" width="32" height="32" 
+                     style="cursor: pointer;" data-bs-toggle="modal" data-bs-target="#profileModal"
+                     alt="{{.Username}}'s avatar">
+                
+                <span class="navbar-text d-none d-md-inline text-body">
+                    Welcome, <a href="#" class="text-decoration-none fw-bold text-primary" 
+                                data-bs-toggle="modal" data-bs-target="#profileModal">{{ .Username }}</a>
+                </span>
+            </div>
+            {{end}}
             
             <div class="d-flex gap-2 align-items-center">
                 {{if $.IsLoggedIn}}
@@ -24,39 +34,128 @@
                     <button type="submit" class="btn btn-sm btn-outline-success">Login/Sign Up</button>
                 </form>
                 {{end}}
+
+                <div class="dropdown ms-2">
+                    <button class="btn btn-link nav-link py-2 px-0 px-lg-2 dropdown-toggle d-flex align-items-center" id="bd-theme" type="button" aria-expanded="false" data-bs-toggle="dropdown" data-bs-display="static">
+                        <span class="theme-icon-active">🌓</span>
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end shadow" aria-labelledby="bd-theme">
+                        <li><button type="button" class="dropdown-item d-flex align-items-center" data-bs-theme-value="light">☀️ Light</button></li>
+                        <li><button type="button" class="dropdown-item d-flex align-items-center" data-bs-theme-value="dark">🌙 Dark</button></li>
+                        <li><button type="button" class="dropdown-item d-flex align-items-center" data-bs-theme-value="auto">🌓 Auto</button></li>
+                    </ul>
+                </div>
             </div>
         </div>
     </div>
 </nav>
 
-<div class="modal fade" id="createRepoModal" tabindex="-1" aria-labelledby="createRepoModalLabel" aria-hidden="true">
+<div class="modal fade" id="profileModal" tabindex="-1" aria-labelledby="profileModalLabel" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content border shadow">
       <div class="modal-header border-bottom-0">
-        <h5 class="modal-title fw-bold" id="createRepoModalLabel">Create New Repository</h5>
+        <h5 class="modal-title fw-bold">User Profile</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body text-center py-4">
+        <img src="https://ui-avatars.com/api/?name={{.Username}}&size=128&background=random" 
+             class="rounded-circle shadow mb-3 border border-3 border-primary-subtle" width="100" height="100">
+        
+        <div id="profileDisplay">
+            <h3 class="fw-bold mb-1">{{.Username}}</h3>
+            <p class="text-body-secondary px-4 small mb-4">
+                {{if $.Profile.Bio}}{{$.Profile.Bio}}{{else}}No bio provided.{{end}}
+            </p>
+        </div>
+
+        {{if $.Profile.IsOwnProfile}}
+        <form id="profileEditForm" class="d-none mb-4 px-4 text-start" action="/update-profile" method="POST">
+            <div class="mb-3">
+                <label class="form-label small fw-bold text-uppercase">Bio</label>
+                <textarea class="form-control shadow-sm" name="bio" rows="3" placeholder="Tell us about yourself..." maxlength="160">{{$.Profile.Bio}}</textarea>
+            </div>
+            <div class="d-flex gap-2">
+                <button type="submit" class="btn btn-sm btn-success flex-grow-1 fw-bold">Save</button>
+                <button type="button" class="btn btn-sm btn-light border" onclick="toggleEditProfile()">Cancel</button>
+            </div>
+        </form>
+        {{end}}
+
+        <div class="d-flex justify-content-center gap-5 mb-4">
+          <div class="text-center">
+            <div class="fw-bold h4 mb-0">{{$.Profile.StarCount}}</div>
+            <div class="small text-uppercase text-body-secondary" style="font-size: 0.7rem;">Stars</div>
+          </div>
+          <div class="text-center">
+            <div class="fw-bold h4 mb-0">{{$.Profile.FollowerCount}}</div>
+            <div class="small text-uppercase text-body-secondary" style="font-size: 0.7rem;">Followers</div>
+          </div>
+        </div>
+
+        <div class="d-grid gap-2 px-4">
+          <button class="btn btn-primary fw-bold shadow-sm" onclick="openRepoModal()">
+            My Repositories
+          </button>
+          
+          {{if $.Profile.IsOwnProfile}}
+          <button id="editProfileBtn" class="btn btn-sm btn-link text-decoration-none text-body-secondary mt-2" onclick="toggleEditProfile()">
+             <i class="bi bi-pencil"></i> Edit Profile
+          </button>
+          {{end}}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="repoListModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content border shadow">
+      <div class="modal-header border-bottom-0">
+        <h5 class="modal-title fw-bold">My Repositories</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-0">
+        <div class="list-group list-group-flush border-top border-bottom" id="repoListContainer" style="min-height: 200px;">
+            </div>
+      </div>
+      <div class="modal-footer border-top-0 d-flex justify-content-between align-items-center">
+        <button class="btn btn-sm btn-outline-secondary px-3" id="prevRepos" disabled>Previous</button>
+        <span class="small text-body-secondary fw-bold" id="repoPageInfo">Page 1</span>
+        <button class="btn btn-sm btn-outline-secondary px-3" id="nextRepos" disabled>Next</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="createRepoModal" tabindex="-1" aria-labelledby="createRepoModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content border shadow">
+      <div class="modal-header border-bottom-0 px-4 pt-4">
+        <h5 class="modal-title fw-bold" id="createRepoModalLabel">Create a new repository</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <form action="/create-repo" method="POST">
-        <div class="modal-body py-4">
+        <div class="modal-body px-4">
+          <p class="text-body-secondary small mb-4">A repository contains all project files, including the revision history.</p>
           <div class="mb-3">
-            <label for="repoName" class="form-label small fw-semibold text-uppercase text-body-secondary">Repository Name</label>
-            <input type="text" class="form-control form-control-lg bg-body text-body" id="repoName" name="name" placeholder="my-awesome-project" required pattern="^[a-zA-Z0-9-_]+$">
-            <div class="form-text mt-2">
-              Use only letters, numbers, dashes, and underscores.
-            </div>
+            <label for="repoName" class="form-label small fw-bold text-uppercase">Repository name</label>
+            <input type="text" class="form-control form-control-lg bg-body shadow-sm" id="repoName" name="name" placeholder="my-awesome-project" required>
           </div>
-
-          <div class="mb-3 form-check form-switch">
-            <input class="form-check-input" type="checkbox" role="switch" id="isPrivate" name="is_private" value="1">
-            <label class="form-check-label small" for="isPrivate">Private repository</label>
-            <div class="form-text mt-1">Private repositories are only visible to you and users you grant access to.</div>
+          <div class="mb-3">
+            <div class="form-check form-check-inline">
+              <input class="form-check-input" type="radio" name="visibility" id="public" value="public" checked>
+              <label class="form-check-label small fw-bold" for="public">Public</label>
+            </div>
+            <div class="form-check form-check-inline">
+              <input class="form-check-input" type="radio" name="visibility" id="private" value="private">
+              <label class="form-check-label small fw-bold" for="private">Private</label>
+            </div>
           </div>
           <div class="mb-3 form-check form-switch">
             <input class="form-check-input" type="checkbox" role="switch" id="initReadme" name="init_readme" value="1">
             <label class="form-check-label small" for="initReadme">Initialize with a README.md</label>
-            <div class="form-text mt-1">This will create an initial commit with a README file.</div>
           </div>
-          <!-- Todo: .gitignore and license options -->
         </div>
         <div class="modal-footer border-top-0 px-4 pb-4">
           <button type="button" class="btn btn-outline-secondary px-4" data-bs-dismiss="modal">Cancel</button>
@@ -67,7 +166,8 @@
   </div>
 </div>
 
-<script defer>
+<script>
+    // Theme Switcher Logic
     const setTheme = theme => {
         if (theme === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches) {
             document.documentElement.setAttribute('data-bs-theme', 'dark')
@@ -76,14 +176,57 @@
         }
         localStorage.setItem('theme', theme)
     }
-
     const storedTheme = localStorage.getItem('theme') || 'auto'
     setTheme(storedTheme)
-
     document.querySelectorAll('[data-bs-theme-value]').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const theme = btn.getAttribute('data-bs-theme-value')
-            setTheme(theme)
-        })
+        btn.addEventListener('click', () => setTheme(btn.getAttribute('data-bs-theme-value')))
     })
+
+    // Profile UI Logic
+    function toggleEditProfile() {
+        document.getElementById('profileDisplay').classList.toggle('d-none');
+        document.getElementById('profileEditForm').classList.toggle('d-none');
+        document.getElementById('editProfileBtn').classList.toggle('d-none');
+    }
+
+    // Repository Pagination Logic
+    let currentRepoPage = 1;
+    function openRepoModal() {
+        // Hide Profile Modal and Show Repo Modal
+        bootstrap.Modal.getInstance(document.getElementById('profileModal')).hide();
+        new bootstrap.Modal(document.getElementById('repoListModal')).show();
+        fetchRepos(1);
+    }
+
+    async function fetchRepos(page) {
+        const container = document.getElementById('repoListContainer');
+        container.innerHTML = '<div class="text-center p-5"><div class="spinner-border spinner-border-sm text-primary"></div></div>';
+        
+        try {
+            const resp = await fetch(`/api/user-repos?page=${page}`);
+            const data = await resp.json();
+            
+            container.innerHTML = data.repos.map(r => `
+                <a href="/view/${r.Owner}/${r.Name}" class="list-group-item list-group-item-action py-3 px-4 border-0">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <strong class="text-primary">${r.Name}</strong>
+                            ${r.IsPrivate ? '<span class="ms-1 small text-body-secondary">🔒</span>' : ''}
+                        </div>
+                        <span class="badge rounded-pill bg-body-secondary text-body small">★ ${r.StarCount}</span>
+                    </div>
+                </a>
+            `).join('') || '<p class="text-center py-5 text-body-secondary">No repositories found.</p>';
+            
+            currentRepoPage = page;
+            document.getElementById('repoPageInfo').innerText = `Page ${page}`;
+            document.getElementById('prevRepos').disabled = (page === 1);
+            document.getElementById('nextRepos').disabled = !data.hasMore;
+        } catch (e) {
+            container.innerHTML = '<p class="text-center py-5 text-danger">Error loading repositories.</p>';
+        }
+    }
+
+    document.getElementById('prevRepos')?.addEventListener('click', () => fetchRepos(currentRepoPage - 1));
+    document.getElementById('nextRepos')?.addEventListener('click', () => fetchRepos(currentRepoPage + 1));
 </script>

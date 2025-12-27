@@ -60,54 +60,72 @@ type CommitInfo struct {
 	MessageShort string
 }
 
+type UserProfile struct {
+	Username       string
+	Bio            string
+	StarCount      int
+	FollowerCount  int
+	FollowingCount int
+	IsOwnProfile   bool
+}
+
 const initSchema = `
+-- Users table: Stores credentials and profile information
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE NOT NULL COLLATE NOCASE,
+    username TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
+    public_key TEXT,
+    bio TEXT DEFAULT '',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Repositories table: Tracks metadata and privacy settings
 CREATE TABLE IF NOT EXISTS repositories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
     name TEXT NOT NULL,
-    description TEXT,
+    description TEXT DEFAULT '', -- Added this
     is_private INTEGER DEFAULT 0,
     download_count INTEGER DEFAULT 0,
     star_count INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
     UNIQUE(user_id, name)
 );
-CREATE TABLE IF NOT EXISTS public_keys (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+-- Favorites (Stars) table: Relationship between users and starred repos
+CREATE TABLE IF NOT EXISTS favorites (
     user_id INTEGER NOT NULL,
-    key_data TEXT NOT NULL UNIQUE, 
-    label TEXT,
+    repo_id INTEGER NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    PRIMARY KEY (user_id, repo_id),
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY(repo_id) REFERENCES repositories(id) ON DELETE CASCADE
 );
+
+-- Follows table: Social relationship for the "User Profile" counts
+CREATE TABLE IF NOT EXISTS follows (
+    follower_id INTEGER NOT NULL,
+    following_id INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (follower_id, following_id),
+    FOREIGN KEY(follower_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY(following_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- Sessions/Tokens table: For web authentication persistence
 CREATE TABLE IF NOT EXISTS sessions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    token TEXT UNIQUE NOT NULL,
+    token TEXT PRIMARY KEY,
     user_id INTEGER NOT NULL,
     expires_at DATETIME NOT NULL,
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );
-CREATE TABLE IF NOT EXISTS favorites (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    repo_id INTEGER NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY(repo_id) REFERENCES repositories(id) ON DELETE CASCADE,
-    UNIQUE(user_id, repo_id)
-);
-CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
-CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
-CREATE INDEX IF NOT EXISTS idx_repos_owner_name ON repositories(user_id, name);
-CREATE INDEX IF NOT EXISTS idx_favorites_user ON favorites(user_id);
+
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_repo_user ON repositories(user_id);
+CREATE INDEX IF NOT EXISTS idx_fav_user ON favorites(user_id);
+CREATE INDEX IF NOT EXISTS idx_follow_following ON follows(following_id);
 `
 
 // --- Initialization ---
@@ -205,6 +223,8 @@ func main() {
 	})
 	http.HandleFunc("/check-user", app.HandleCheckUser)
 	http.HandleFunc("/logout", app.HandleLogout)
+	http.HandleFunc("/update-profile", app.HandleUpdateProfile)
+	http.HandleFunc("/api/user-repos", app.HandleAPIUserRepos)
 
 	http.HandleFunc("/", app.HandleDashboard)
 	http.HandleFunc("/download/view/", app.HandleDownloadZip)
@@ -335,6 +355,93 @@ func (a *App) HandleCheckUser(w http.ResponseWriter, r *http.Request) {
 	a.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE username=?)", username).Scan(&exists)
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, `{"exists": %v}`, exists)
+}
+
+func (a *App) GetUserProfile(targetUser string, viewer string) (UserProfile, error) {
+	var profile UserProfile
+	profile.Username = targetUser
+	profile.IsOwnProfile = (targetUser == viewer)
+
+	// 1. Fetch Bio
+	err := a.DB.QueryRow("SELECT COALESCE(bio, '') FROM users WHERE username = ?", targetUser).Scan(&profile.Bio)
+	if err != nil {
+		return profile, err
+	}
+
+	// 2. Aggregate Stars across all user's repos
+	queryStars := `SELECT COALESCE(SUM(star_count), 0) FROM repositories 
+                   WHERE user_id = (SELECT id FROM users WHERE username = ?)`
+	a.DB.QueryRow(queryStars, targetUser).Scan(&profile.StarCount)
+
+	// 3. Count Followers
+	queryFollowers := `SELECT COUNT(*) FROM follows 
+                       WHERE following_id = (SELECT id FROM users WHERE username = ?)`
+	a.DB.QueryRow(queryFollowers, targetUser).Scan(&profile.FollowerCount)
+
+	return profile, nil
+}
+
+func (a *App) HandleUpdateProfile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	currUser, err := a.GetUserByTokenFromRequest(r)
+	if err != nil {
+		http.Redirect(w, r, "/auth", http.StatusSeeOther)
+		return
+	}
+
+	bio := r.FormValue("bio")
+	_, err = a.DB.Exec("UPDATE users SET bio = ? WHERE username = ?", bio, currUser)
+	if err != nil {
+		log.Printf("Failed to update profile: %v", err)
+	}
+
+	http.Redirect(w, r, r.Referer(), http.StatusSeeOther)
+}
+
+func (a *App) HandleAPIUserRepos(w http.ResponseWriter, r *http.Request) {
+	currUser, err := a.GetUserByTokenFromRequest(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	pageSize := 5
+	offset := (page - 1) * pageSize
+
+	rows, _ := a.DB.Query(`
+        SELECT name, download_count, star_count, is_private 
+        FROM repositories 
+        WHERE user_id = (SELECT id FROM users WHERE username = ?)
+        ORDER BY created_at DESC LIMIT ? OFFSET ?`, currUser, pageSize+1, offset)
+	defer rows.Close()
+
+	var repos []map[string]interface{}
+	for rows.Next() {
+		var name string
+		var dl, stars, priv int
+		rows.Scan(&name, &dl, &stars, &priv)
+		repos = append(repos, map[string]interface{}{
+			"Name": name, "Owner": currUser, "StarCount": stars, "IsPrivate": priv == 1,
+		})
+	}
+
+	hasMore := len(repos) > pageSize
+	if hasMore {
+		repos = repos[:pageSize]
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"repos":   repos,
+		"hasMore": hasMore,
+	})
 }
 
 // --- Repository Management ---
@@ -517,73 +624,72 @@ func (a *App) HandleCommits(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) HandleDashboard(w http.ResponseWriter, r *http.Request) {
-	currUser, err := a.GetUserByTokenFromRequest(r)
-	isLoggedIn := err == nil
+	currUser, err := a.GetUserByTokenFromRequest(r) //
+	isLoggedIn := err == nil                        //
 
 	type RepoInfo struct {
 		Name, Owner                       string
 		DownloadCount, StarCount          int
 		IsPrivate, IsFavorite, HasContent bool
 		CreatedAt                         time.Time
-	}
+	} //
 
-	var allRepos, myRepos, favorites []RepoInfo
+	var allRepos, myRepos, favorites []RepoInfo //
 
-	// Scan Disk
-	users, _ := os.ReadDir(a.BaseDir)
+	// Scan Disk for repositories
+	users, _ := os.ReadDir(a.BaseDir) //
 	for _, u := range users {
 		if !u.IsDir() {
 			continue
 		}
-		owner := u.Name()
-		repos, _ := os.ReadDir(filepath.Join(a.BaseDir, owner))
+		owner := u.Name()                                       //
+		repos, _ := os.ReadDir(filepath.Join(a.BaseDir, owner)) //
 		for _, repoDir := range repos {
-			name := repoDir.Name()
+			name := repoDir.Name() //
 			if !strings.HasSuffix(name, ".git") && !strings.Contains(name, ".") {
-				// Handle non-bare checkout if needed, simplified here to just git suffix check
 				continue
 			}
-			repoName := strings.TrimSuffix(name, ".git")
+			repoName := strings.TrimSuffix(name, ".git") //
 
-			// Privacy Check
+			// Privacy and Metadata Check
 			var isPrivInt int
 			var dlCount, starCount int
 			var createdStr string
 			err := a.DB.QueryRow(`SELECT is_private, download_count, COALESCE(star_count,0), created_at 
 				FROM repositories WHERE name=? AND user_id=(SELECT id FROM users WHERE username=?)`,
-				repoName, owner).Scan(&isPrivInt, &dlCount, &starCount, &createdStr)
+				repoName, owner).Scan(&isPrivInt, &dlCount, &starCount, &createdStr) //
 
 			if err != nil {
 				continue
-			} // Not in DB
+			}
 
-			isPriv := isPrivInt == 1
+			isPriv := isPrivInt == 1 //
 			if isPriv && currUser != owner {
 				continue
 			}
 
-			// Check Content
+			// Check if repository has content
 			hasContent := false
 			if r, err := git.PlainOpen(filepath.Join(a.BaseDir, owner, name)); err == nil {
 				if _, err := r.Head(); err == nil {
 					hasContent = true
 				}
-			}
+			} //
 
-			// Check Favorite
+			// Check Favorite status for the logged-in user
 			isFav := false
 			if isLoggedIn {
 				var exists int
 				a.DB.QueryRow(`SELECT EXISTS(SELECT 1 FROM favorites f JOIN repositories r ON f.repo_id = r.id 
 					WHERE f.user_id=(SELECT id FROM users WHERE username=?) 
 					AND r.name=? AND r.user_id=(SELECT id FROM users WHERE username=?))`,
-					currUser, repoName, owner).Scan(&exists)
+					currUser, repoName, owner).Scan(&exists) //
 				isFav = exists == 1
 			}
 
-			ts, _ := time.Parse("2006-01-02 15:04:05", createdStr)
+			ts, _ := time.Parse("2006-01-02 15:04:05", createdStr) //
 
-			info := RepoInfo{repoName, owner, dlCount, starCount, isPriv, isFav, hasContent, ts}
+			info := RepoInfo{repoName, owner, dlCount, starCount, isPriv, isFav, hasContent, ts} //
 			allRepos = append(allRepos, info)
 			if owner == currUser {
 				myRepos = append(myRepos, info)
@@ -591,33 +697,45 @@ func (a *App) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Fetch Favorites
+	// Fetch Favorites for the Sidebar/Tab
 	if isLoggedIn {
 		rows, _ := a.DB.Query(`SELECT r.name, u.username, r.download_count, r.star_count, r.is_private 
 			FROM favorites f JOIN repositories r ON f.repo_id=r.id JOIN users u ON r.user_id=u.id 
-			WHERE f.user_id=(SELECT id FROM users WHERE username=?)`, currUser)
+			WHERE f.user_id=(SELECT id FROM users WHERE username=?)`, currUser) //
 		defer rows.Close()
 		for rows.Next() {
 			var ri RepoInfo
 			var privInt int
-			rows.Scan(&ri.Name, &ri.Owner, &ri.DownloadCount, &ri.StarCount, &privInt)
+			rows.Scan(&ri.Name, &ri.Owner, &ri.DownloadCount, &ri.StarCount, &privInt) //
 			ri.IsPrivate = privInt == 1
 			ri.IsFavorite = true
 			favorites = append(favorites, ri)
 		}
 	}
 
-	// Sort (default recent)
+	// Sort repositories by most recent
 	sorter := func(l []RepoInfo) {
 		sort.Slice(l, func(i, j int) bool { return l[i].CreatedAt.After(l[j].CreatedAt) })
-	}
+	} //
 	sorter(allRepos)
 	sorter(myRepos)
 
+	// NEW: Fetch Profile Stats for the Modal
+	var profile UserProfile
+	if isLoggedIn {
+		// Assuming GetUserProfile is implemented as discussed to fetch bio, stars, and followers
+		profile, _ = a.GetUserProfile(currUser, currUser)
+	}
+
+	// Render the dashboard with original data and new Profile data
 	a.render(w, "dashboard.tmpl", map[string]interface{}{
-		"Username": currUser, "IsLoggedIn": isLoggedIn,
-		"AllRepos": allRepos, "MyRepos": myRepos, "Favorites": favorites,
-	})
+		"Username":   currUser,
+		"IsLoggedIn": isLoggedIn,
+		"Profile":    profile, // Data for the new User Profile modal
+		"AllRepos":   allRepos,
+		"MyRepos":    myRepos,
+		"Favorites":  favorites,
+	}) //
 }
 
 func (a *App) HandleView(w http.ResponseWriter, r *http.Request) {
