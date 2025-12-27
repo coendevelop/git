@@ -1,3 +1,5 @@
+{{/* Base navbar: top navigation bar and the 'Create Repository' modal.
+   Expects context fields like .IsLoggedIn and .Username. */}}
 <nav class="navbar navbar-expand-lg bg-body-tertiary border-bottom sticky-top shadow-sm mb-5">
     <div class="container">
         <a class="navbar-brand text-primary" href="/">
@@ -6,16 +8,16 @@
 
         <div class="d-flex align-items-center ms-auto">
             <span class="navbar-text me-3 d-none d-md-inline text-body">
-                Welcome, <strong>{{ .Username }}</strong>
+                {{if $.IsLoggedIn}}Welcome, <strong>{{ .Username }}</strong>{{end}}
             </span>
             
             <div class="d-flex gap-2 align-items-center">
                 {{if $.IsLoggedIn}}
-                <button type="button" class="btn btn-sm btn-primary px-3 shadow-sm" data-bs-toggle="modal" data-bs-target="#createRepoModal">
+                <button type="button" class="btn btn-sm btn-outline-primary px-3 shadow-sm" data-bs-toggle="modal" data-bs-target="#createRepoModal">
                     <strong>+</strong> New Repo
                 </button>
                 <form action="/logout" method="POST" class="m-0">
-                    <button type="submit" class="btn btn-sm btn-outline-secondary">Logout</button>
+                    <button type="submit" class="btn btn-sm btn-outline-danger">Logout</button>
                 </form>
                 {{else}}
                 <form action="/auth" method="GET" class="m-0">

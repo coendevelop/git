@@ -14,17 +14,24 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// generateSessionToken returns a URL-safe random token suitable for session IDs.
+// It uses 32 bytes of cryptographically secure random data and base64 URL
+// encoding to avoid characters that need escaping in cookies.
 func generateSessionToken() string {
 	b := make([]byte, 32)
-	rand.Read(b)
+	_, _ = rand.Read(b) // crypto/rand rarely fails; ignore error in this context
 	return base64.URLEncoding.EncodeToString(b)
 }
 
+// DeleteSession removes a session identified by `token` from the store.
 func (s *AuthStore) DeleteSession(token string) error {
 	_, err := s.db.Exec("DELETE FROM sessions WHERE token = ?", token)
 	return err
 }
 
+// CreateSession creates and persists a session token for `username` and returns
+// the token. The session expires in 24 hours. Returns an error if the user is
+// not found or inserting the session fails.
 func (s *AuthStore) CreateSession(username string) (string, error) {
 	var userID int
 	// Case-insensitive lookup thanks to the NOCASE schema
@@ -34,10 +41,10 @@ func (s *AuthStore) CreateSession(username string) (string, error) {
 		return "", err
 	}
 
-	token := generateSessionToken() // Your token generator
+	token := generateSessionToken()
 	expiresAt := time.Now().Add(24 * time.Hour)
 
-	// Ensure the column names (token, user_id, expires_at) match your initSchema exactly
+	// Persist the token. Expect columns: token, user_id, expires_at.
 	_, err = s.db.Exec("INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)",
 		token, userID, expiresAt)
 
@@ -64,6 +71,9 @@ func (s *AuthStore) GetUserByToken(token string) (string, error) {
 	return username, nil
 }
 
+// GetUserByTokenFromRequest extracts the session cookie from the request and
+// returns the associated username via GetUserByToken. If the cookie is missing
+// or invalid, an error is returned.
 func (s *AuthStore) GetUserByTokenFromRequest(r *http.Request) (string, error) {
 	cookie, err := r.Cookie("session_token")
 	if err != nil {
@@ -72,7 +82,9 @@ func (s *AuthStore) GetUserByTokenFromRequest(r *http.Request) (string, error) {
 	return s.GetUserByToken(cookie.Value)
 }
 
-// Use the pointer to AuthStore, but w is passed by interface
+// setSessionCookie creates a session (DB) and sets a secure cookie on the
+// response. Cookies are marked HttpOnly and use SameSite=Lax to reduce CSRF
+// risk while keeping reasonable UX for navigation.
 func (s *AuthStore) setSessionCookie(w http.ResponseWriter, username string) {
 	token, err := s.CreateSession(username)
 	if err != nil {
@@ -90,10 +102,13 @@ func (s *AuthStore) setSessionCookie(w http.ResponseWriter, username string) {
 	}
 
 	http.SetCookie(w, cookie)
-	// Add this log to confirm the token being sent
-	log.Printf("DEBUG: Setting cookie for %s: %s", username, token)
+	// Log the presence of a cookie for debugging; avoid logging tokens in
+	// production unless behind redaction/logging controls.
+	log.Printf("DEBUG: Setting cookie for %s", username)
 }
 
+// setSessionCookieWithToken sets the given `token` on the response cookie.
+// This is useful when a token has already been generated and persisted.
 func (s *AuthStore) setSessionCookieWithToken(w http.ResponseWriter, token string) {
 	cookie := &http.Cookie{
 		Name:     "session_token",
@@ -104,12 +119,15 @@ func (s *AuthStore) setSessionCookieWithToken(w http.ResponseWriter, token strin
 		SameSite: http.SameSiteLaxMode,
 	}
 	http.SetCookie(w, cookie)
-	log.Printf("DEBUG: Cookie 'session_token' set in headers")
+	log.Printf("DEBUG: session cookie set")
 }
 
-// Global regex for username validation
+// usernameRegex matches allowed characters for usernames: letters, digits,
+// dots, underscores and hyphens. Length is enforced separately.
 var usernameRegex = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 
+// IsValidUsername returns true if the username length is acceptable and the
+// characters match the allowed set. This is used during registration.
 func IsValidUsername(username string) bool {
 	// Check length (good practice) and characters
 	if len(username) < 3 || len(username) > 32 {
@@ -118,6 +136,9 @@ func IsValidUsername(username string) bool {
 	return usernameRegex.MatchString(username)
 }
 
+// RegisterUser creates a new user with a bcrypt-hashed password. If the
+// username is already taken the function returns an error that contains
+// "user_exists" so callers can react appropriately (e.g., auto-login).
 func (s *AuthStore) RegisterUser(username, password string) error {
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), 10)
 	if err != nil {
@@ -137,6 +158,10 @@ func (s *AuthStore) RegisterUser(username, password string) error {
 	return nil
 }
 
+// HandleRegister handles POSTed registration forms. It creates a new user
+// and then creates a session. If the username already exists the code logs an
+// informational message and proceeds to session creation (auto-login), which
+// may be desired behavior in some deployments.
 func (s *AuthStore) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		username := r.FormValue("username")
@@ -168,6 +193,9 @@ func (s *AuthStore) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// Authenticate checks whether the given username/password pair is valid.
+// Returns (true, nil) on success, (false, nil) for invalid credentials, and
+// (false, err) if a DB error occurred.
 func (s *AuthStore) Authenticate(username, password string) (bool, error) {
 	var hashedPassword string
 	// Case-insensitive lookup
@@ -188,6 +216,9 @@ func (s *AuthStore) Authenticate(username, password string) (bool, error) {
 	return true, nil
 }
 
+// HandleLogin processes POSTed login forms. On successful authentication
+// it creates a session and redirects to /dashboard. Invalid credentials return
+// a 401 Unauthorized response.
 func (s *AuthStore) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		username := r.FormValue("username")
@@ -207,6 +238,9 @@ func (s *AuthStore) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// HandleLogout invalidates the session both in the DB (if present) and in
+// the client by setting an expired cookie. The handler then redirects the
+// user to the auth page.
 func (s *AuthStore) HandleLogout(w http.ResponseWriter, r *http.Request) {
 	// 1. Get the token from the cookie
 	cookie, err := r.Cookie("session_token")
@@ -226,10 +260,16 @@ func (s *AuthStore) HandleLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, newCookie)
 
-	log.Printf("Successful logout for %s", cookie.Value)
+	if cookie != nil {
+		log.Printf("Successful logout for %s", cookie.Value)
+	}
 	// 4. Redirect to the all-in-one auth page
 	http.Redirect(w, r, "/auth", http.StatusSeeOther)
 }
+
+// GetUsernameFromSession returns the username associated with the session
+// token present in the request cookie. If the user is not logged in or an
+// error occurs, an empty string is returned.
 func (m *RepoManager) GetUsernameFromSession(r *http.Request) string {
 	// 1. Extract the token from the cookie
 	cookie, err := r.Cookie("session_token")

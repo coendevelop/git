@@ -17,6 +17,10 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// parseGitCommand takes the raw exec payload from ssh (e.g. "git-upload-pack 'user/repo.git'")
+// and returns the git subcommand (git-upload-pack, git-receive-pack, etc.) and the
+// repository path as separate strings. If the payload doesn't include a path,
+// the second return value is empty.
 func parseGitCommand(payload string) (string, string) {
 	// The payload looks like: git-upload-pack 'user/repo.git'
 	// 1. Split by space
@@ -31,6 +35,9 @@ func parseGitCommand(payload string) (string, string) {
 
 	return gitCmd, repoPath
 }
+
+// generateHostKey creates a new RSA host key and writes it in PEM format to
+// `path` with 0600 permissions. Used when no host key exists on disk.
 func generateHostKey(path string) error {
 	// 1. Generate the private key
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -54,6 +61,10 @@ func generateHostKey(path string) error {
 	return pem.Encode(f, privateKeyPEM)
 }
 
+// setupSSHConfig constructs an ssh.ServerConfig that authenticates incoming
+// public-key connections by mapping the provided public key to an application
+// username (via AuthStore.GetUserByKey). If no host key exists, it will be
+// generated on disk and loaded.
 func setupSSHConfig(store *AuthStore) (*ssh.ServerConfig, error) {
 	config := &ssh.ServerConfig{
 		PublicKeyCallback: func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
@@ -92,6 +103,11 @@ func setupSSHConfig(store *AuthStore) (*ssh.ServerConfig, error) {
 	return config, nil
 }
 
+// handleSSHConn accepts a raw net.Conn, establishes the SSH server
+// handshake and handles incoming session channels. Exec requests are parsed
+// and authorized by checking that the requested repo path begins with the
+// authenticated username. The implementation runs git subprocesses and
+// pipes stdin/stdout/stderr between the SSH channel and the process.
 func handleSSHConn(nConn net.Conn, config *ssh.ServerConfig) {
 	// Note: Always handle the error from NewServerConn in production!
 	sConn, chans, reqs, err := ssh.NewServerConn(nConn, config)

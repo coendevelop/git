@@ -7,6 +7,9 @@ import (
 	"net/http"
 )
 
+// main initializes the database and repository manager, registers HTTP
+// handlers for the web UI and starts both the HTTP server and the SSH server
+// accept loop. The SSH server uses port 2222 by default for development.
 func main() {
 	// Init Database & Store
 	store, err := NewAuthStore("./data/git_service.db")
@@ -42,7 +45,6 @@ func main() {
 	http.HandleFunc("/download/view/", mgr.HandleDownloadZip)
 	http.HandleFunc("/create-repo", mgr.HandleCreateRepo)
 	// Favorites API
-	http.HandleFunc("/favorite/toggle", mgr.HandleToggleFavorite)
 	http.HandleFunc("/favorite/add", mgr.HandleAddFavorite)
 	http.HandleFunc("/favorite/remove", mgr.HandleRemoveFavorite)
 

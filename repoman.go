@@ -17,18 +17,25 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
+// FileInfo represents a file entry shown in the UI. `IsURL` is true for regular
+// files (so renderers can treat them as downloadable), `Size` is optional.
 type FileInfo struct {
 	Name  string
 	IsURL bool
 	Size  int64
 }
 
+// RepoManager handles repositories on disk, database interactions and
+// template rendering for the web UI.
 type RepoManager struct {
 	BaseDir       string
 	Store         *AuthStore
 	templateCache map[string]*template.Template
 }
 
+// NewRepoManager creates a RepoManager rooted at baseDir and loads all
+// templates from the `templates` directory into a template set used for
+// rendering. It returns an error if template loading or initialization fails.
 func NewRepoManager(baseDir string, store *AuthStore) (*RepoManager, error) {
 	mgr := &RepoManager{
 		BaseDir: baseDir,
@@ -77,6 +84,9 @@ func NewRepoManager(baseDir string, store *AuthStore) (*RepoManager, error) {
 	return mgr, nil
 }
 
+// renderTemplate executes a named template from the loaded template set
+// and writes the result to the provided ResponseWriter. Errors are logged and
+// translated into a 500 Template error for the client.
 func (m *RepoManager) renderTemplate(w http.ResponseWriter, name string, data interface{}) {
 	// We always use the "root" set
 	tmpl := m.templateCache["root"]
@@ -91,7 +101,9 @@ func (m *RepoManager) renderTemplate(w http.ResponseWriter, name string, data in
 	}
 }
 
-// getAuthenticatedUser is a helper to DRY up our auth logic
+// getAuthenticatedUser is a helper to extract the username for the session
+// token present in the request. It returns an error when the session is
+// missing/invalid.
 func (m *RepoManager) getAuthenticatedUser(r *http.Request) (string, error) {
 	cookie, err := r.Cookie("session_token")
 	if err != nil {
@@ -100,6 +112,11 @@ func (m *RepoManager) getAuthenticatedUser(r *http.Request) (string, error) {
 	return m.Store.GetUserByToken(cookie.Value)
 }
 
+// CreateNewRepository initializes a bare git repository on disk for `username`
+// and inserts a metadata row in the database. `isPrivate` toggles the
+// repositories.is_private flag. On DB failure the repository directory is
+// currently left in-place
+// TODO: clean up.
 func (m *RepoManager) CreateNewRepository(username string, repoName string, isPrivate bool) error {
 	// 1. Create the repository on disk (Bare Repo)
 	repoPath := filepath.Join(m.BaseDir, username, repoName+".git")
@@ -147,8 +164,8 @@ func (m *RepoManager) HandleCreateRepo(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/view/"+username+"/"+repoName+"/main/", http.StatusSeeOther)
 }
 
-// TODO: Add check for loggeduser = reponame
-// TODO: remove repo from database
+// DeleteRepo removes a repository directory from disk.
+// TODO: we should validate the caller and remove related DB entries as well.
 func (m *RepoManager) DeleteRepo(username, repoName string) error {
 	// Sanitize inputs to prevent directory traversal attacks
 	username = filepath.Clean(username)
@@ -165,32 +182,8 @@ func (m *RepoManager) DeleteRepo(username, repoName string) error {
 	return nil
 }
 
-func (m *RepoManager) ListUserRepos(username string) ([]string, error) {
-	userDir := filepath.Join(m.BaseDir, username)
-
-	// DEBUG: Copy this path from your terminal and check it in your file explorer
-	log.Printf("DEBUG: Looking for repos in: %s", userDir)
-
-	// Create the directory if it doesn't exist yet
-	if _, err := os.Stat(userDir); os.IsNotExist(err) {
-		return []string{}, nil
-	}
-
-	files, err := os.ReadDir(userDir)
-	if err != nil {
-		return nil, err
-	}
-
-	var repos []string
-	for _, f := range files {
-		if f.IsDir() && strings.HasSuffix(f.Name(), ".git") {
-			// Remove the .git suffix for the UI display
-			repos = append(repos, strings.TrimSuffix(f.Name(), ".git"))
-		}
-	}
-	return repos, nil
-}
-
+// GetRepoFiles returns a list of files from the repository's latest commit
+// (HEAD). If the repo is empty or missing, this returns an error.
 func (m *RepoManager) GetRepoFiles(username, repoName string) ([]FileInfo, error) {
 	repoPath := filepath.Join(m.BaseDir, username, repoName+".git")
 
@@ -229,6 +222,9 @@ func (m *RepoManager) GetRepoFiles(username, repoName string) ([]FileInfo, error
 	return files, nil
 }
 
+// HandleRepoView renders an overview of a repository's files.
+// It reads files using go-git. If the repo is empty
+// a friendly message is shown to the user.
 func (m *RepoManager) HandleRepoView(w http.ResponseWriter, r *http.Request) {
 	// 1. Authenticate the user (ensure they are logged in)
 	username, err := m.Store.GetUserByTokenFromRequest(r)
@@ -546,7 +542,6 @@ func (m *RepoManager) IncrementDownloadCount(username, repoName string) error {
 	}
 	return nil
 }
-
 func (m *RepoManager) GetDownloadCount(username, repoName string) int {
 	var count int
 	query := `
@@ -719,51 +714,6 @@ func (m *RepoManager) GetFavoritesForUser(username string) ([]map[string]interfa
 		})
 	}
 	return res, nil
-}
-
-// HTTP handler: toggle favorite (POST)
-func (m *RepoManager) HandleToggleFavorite(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", 405)
-		return
-	}
-	user, err := m.Store.GetUserByTokenFromRequest(r)
-	if err != nil {
-		http.Error(w, "Unauthorized", 401)
-		return
-	}
-	owner := r.FormValue("owner")
-	repo := r.FormValue("repo")
-	if owner == "" || repo == "" {
-		http.Error(w, "Missing parameters", 400)
-		return
-	}
-	fav, err := m.IsFavorite(user, owner, repo)
-	if err != nil {
-		log.Printf("ERROR checking favorite: %v", err)
-		http.Error(w, "Server error", 500)
-		return
-	}
-	if fav {
-		if err := m.RemoveFavorite(user, owner, repo); err != nil {
-			log.Printf("ERROR removing favorite: %v", err)
-			http.Error(w, "Server error", 500)
-			return
-		}
-		fav = false
-	} else {
-		if err := m.AddFavorite(user, owner, repo); err != nil {
-			log.Printf("ERROR adding favorite: %v", err)
-			http.Error(w, "Server error", 500)
-			return
-		}
-		fav = true
-	}
-
-	// Return current favorited state and updated star count
-	sc := m.GetStarCount(owner, repo)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"favorited": fav, "star_count": sc})
 }
 
 // HTTP handler: add favorite (POST)

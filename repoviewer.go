@@ -15,6 +15,9 @@ type DashboardData struct {
 	Repos    []string
 }
 
+// HandleDashboard enumerates repositories on disk, applies privacy rules,
+// and renders the dashboard template showing all repos, the user's own repos
+// and favorites. Sorting and simple filtering are handled here.
 func (m *RepoManager) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 	// 1. Attempt to get the user, but don't redirect on error
 	username, err := m.Store.GetUserByTokenFromRequest(r)

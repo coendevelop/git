@@ -15,6 +15,9 @@ type AuthStore struct {
 	db *sql.DB
 }
 
+// initSchema contains the SQL schema used to bootstrap the SQLite database.
+// It defines users, repositories, public_keys, sessions and favorites tables
+// and creates useful indexes for typical queries performed by the application.
 const initSchema = `
 -- Users Table: Case-insensitive usernames
 CREATE TABLE IF NOT EXISTS users (
@@ -75,6 +78,9 @@ CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
 CREATE INDEX IF NOT EXISTS idx_repos_owner_name ON repositories(user_id, name);
 CREATE INDEX IF NOT EXISTS idx_favorites_user ON favorites(user_id);`
 
+// NewAuthStore opens (or creates) the SQLite database at dbPath, applies the
+// schema and performs minimal migrations needed for older databases. It returns
+// an AuthStore wrapping the DB connection.
 func NewAuthStore(dbPath string) (*AuthStore, error) {
 	// 1. Ensure the directory for the DB exists
 	dir := filepath.Dir(dbPath)
@@ -130,6 +136,9 @@ func NewAuthStore(dbPath string) (*AuthStore, error) {
 	return &AuthStore{db: db}, nil
 }
 
+// GetUserByKey matches the provided SSH public key against the database of
+// authorized public keys. incomingKey is serialized to the "authorized_keys"
+// textual format and compared as a string to the stored key_data value.
 func (s *AuthStore) GetUserByKey(incomingKey ssh.PublicKey) (string, error) {
 	// 1. Convert the incoming key to the standard "authorized_keys" format
 	// This looks like "ssh-rsa AAAAB3Nza..."
@@ -156,6 +165,9 @@ func (s *AuthStore) GetUserByKey(incomingKey ssh.PublicKey) (string, error) {
 	return username, nil
 }
 
+// HandleCheckUser responds with JSON indicating whether a username exists.
+// Query parameter: ?username=<name>
+// Response: {"exists": true|false}
 func (s *AuthStore) HandleCheckUser(w http.ResponseWriter, r *http.Request) {
 	username := r.URL.Query().Get("username")
 	var exists bool
