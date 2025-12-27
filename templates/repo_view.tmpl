@@ -61,7 +61,7 @@
         {{if .Files}}
         <div class="d-flex gap-2">
             <div class="dropdown">
-                <button class="btn btn-outline-secondary dropdown-toggle btn-sm shadow-sm" type="button" data-bs-toggle="dropdown">
+                <button class="btn btn-outline-primary dropdown-toggle btn-sm shadow-sm" type="button" data-bs-toggle="dropdown">
                     <span class="text-body-secondary small">Branch:</span> <strong>{{$.CurrentBranch}}</strong>
                 </button>
                 <ul class="dropdown-menu dropdown-menu-end shadow">
@@ -71,11 +71,11 @@
                 </ul>
             </div>
             <div class="d-flex align-items-center gap-2">
-                <button class="btn btn-sm btn-primary star-btn shadow-sm fw-bold px-2 rounded-pill d-inline-flex align-items-center gap-1" data-owner="{{.Owner}}" data-repo="{{.RepoName}}" aria-label="Toggle favorite" aria-pressed="{{if .IsFavorite}}true{{else}}false{{end}}">
+                <button class="btn btn-sm btn-outline-primary star-btn shadow-sm fw-bold px-2 rounded-pill d-inline-flex align-items-center gap-1" data-owner="{{.Owner}}" data-repo="{{.RepoName}}" aria-label="Toggle favorite" aria-pressed="{{if .IsFavorite}}true{{else}}false{{end}}">
                     <span class="star-glyph fs-5">{{if .IsFavorite}}★{{else}}☆{{end}}</span>
                     <span class="small ms-1 star-count">{{.StarCount}}</span>
                 </button>
-                <a href="/download/view/{{$.Owner}}/{{$.RepoName}}/{{$.CurrentBranch}}" class="btn btn-sm btn-primary shadow-sm fw-bold px-2 rounded-pill d-inline-flex align-items-center gap-1" role="button" aria-label="Download {{$.RepoName}} as zip" title="{{.DownloadCount}} downloads">
+                <a href="/download/view/{{$.Owner}}/{{$.RepoName}}/{{$.CurrentBranch}}" class="btn btn-sm btn-outline-primary shadow-sm fw-bold px-2 rounded-pill d-inline-flex align-items-center gap-1" role="button" aria-label="Download {{$.RepoName}} as zip" title="{{.DownloadCount}} downloads">
                     <span class="d-inline-block fs-5">📦</span>
                     <span class="small ms-1 d-none d-sm-inline">{{.DownloadCount}}</span>
                 </a>

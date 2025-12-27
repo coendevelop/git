@@ -20,7 +20,7 @@
     }
 </style>
 
-<div class="container py-5">
+<div class="container py-0">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2 class="text-body fw-bold">Dashboard</h2>
         <div class="d-flex align-items-center gap-3">
@@ -61,22 +61,22 @@
                             <div class="meta text-secondary small fw-semibold">Owned by <span class="fw-semibold">{{.Owner}}</span> {{if .IsPrivate}}<span class="badge bg-warning text-dark ms-2">Private</span>{{end}}</div>
                         </div>
                         <div class="d-flex align-items-center gap-2">
-                            <button class="btn btn-sm btn-primary star-btn shadow-sm fw-bold px-2 rounded-pill d-inline-flex align-items-center gap-1" data-owner="{{.Owner}}" data-repo="{{.Name}}" aria-label="Toggle favorite" aria-pressed="{{if .IsFavorite}}true{{else}}false{{end}}">
+                            <button class="btn btn-sm btn-outline-primary star-btn shadow-sm fw-bold px-2 rounded-pill d-inline-flex align-items-center gap-1" data-owner="{{.Owner}}" data-repo="{{.Name}}" aria-label="Toggle favorite" aria-pressed="{{if .IsFavorite}}true{{else}}false{{end}}">
                                 <span class="star-glyph fs-5">{{if .IsFavorite}}★{{else}}☆{{end}}</span>
                                 <span class="small ms-1 star-count">{{.StarCount}}</span>
                             </button>
                             {{if .HasContent}}
-                            <a href="/download/view/{{.Owner}}/{{.Name}}/HEAD" class="btn btn-sm btn-primary shadow-sm fw-bold px-2 rounded-pill d-inline-flex align-items-center gap-1" title="{{.DownloadCount}} downloads" role="button" aria-label="Download {{.Name}}">
+                            <a href="/download/view/{{.Owner}}/{{.Name}}/HEAD" class="btn btn-sm btn-outline-primary shadow-sm fw-bold px-2 rounded-pill d-inline-flex align-items-center gap-1" title="{{.DownloadCount}} downloads" role="button" aria-label="Download {{.Name}}">
                                 <span class="fs-5">⬇</span>
                                 <span class="small ms-1">{{.DownloadCount}}</span>
                             </a>
                             {{else}}
-                            <button class="btn btn-sm btn-primary shadow-sm fw-bold px-2 rounded-pill d-inline-flex align-items-center gap-1 disabled" aria-disabled="true" title="No contents" tabindex="-1" aria-label="No download available">
+                            <button class="btn btn-sm btn-outline-primary shadow-sm fw-bold px-2 rounded-pill d-inline-flex align-items-center gap-1 disabled" aria-disabled="true" title="No contents" tabindex="-1" aria-label="No download available">
                                 <span class="fs-5">⬇</span>
                                 <span class="small ms-1">0</span>
                             </button>
                             {{end}}
-                            <a href="/view/{{.Owner}}/{{.Name}}" class="btn btn-sm btn-outline-secondary">Browse</a>
+                            <a href="/view/{{.Owner}}/{{.Name}}" class="btn btn-sm btn-outline-primary">Browse</a>
                         </div>
                     </div>
                     {{end}}
@@ -96,22 +96,22 @@
                             <div class="meta text-secondary small fw-semibold">{{if .IsPrivate}}<span class="badge bg-warning text-dark">Private</span>{{end}}</div>
                         </div>
                         <div class="d-flex align-items-center gap-2">
-                            <button class="btn btn-sm btn-primary star-btn shadow-sm fw-bold px-2 rounded-pill d-inline-flex align-items-center gap-1" data-owner="{{.Owner}}" data-repo="{{.Name}}" aria-label="Toggle favorite" aria-pressed="{{if .IsFavorite}}true{{else}}false{{end}}">
+                            <button class="btn btn-sm btn-outline-primary star-btn shadow-sm fw-bold px-2 rounded-pill d-inline-flex align-items-center gap-1" data-owner="{{.Owner}}" data-repo="{{.Name}}" aria-label="Toggle favorite" aria-pressed="{{if .IsFavorite}}true{{else}}false{{end}}">
                                 <span class="star-glyph fs-5">{{if .IsFavorite}}★{{else}}☆{{end}}</span>
                                 <span class="small ms-1 star-count">{{.StarCount}}</span>
                             </button>
                             {{if .HasContent}}
-                            <a href="/download/view/{{.Owner}}/{{.Name}}/HEAD" class="btn btn-sm btn-primary shadow-sm fw-bold px-2 rounded-pill d-inline-flex align-items-center gap-1" title="{{.DownloadCount}} downloads" role="button" aria-label="Download {{.Name}}">
+                            <a href="/download/view/{{.Owner}}/{{.Name}}/HEAD" class="btn btn-sm btn-outline-primary shadow-sm fw-bold px-2 rounded-pill d-inline-flex align-items-center gap-1" title="{{.DownloadCount}} downloads" role="button" aria-label="Download {{.Name}}">
                                 <span class="fs-5">⬇</span>
                                 <span class="small ms-1">{{.DownloadCount}}</span>
                             </a>
                             {{else}}
-                            <button class="btn btn-sm btn-primary shadow-sm fw-bold px-2 rounded-pill d-inline-flex align-items-center gap-1 disabled" aria-disabled="true" title="No contents" tabindex="-1" aria-label="No download available">
+                            <button class="btn btn-sm btn-outline-primary shadow-sm fw-bold px-2 rounded-pill d-inline-flex align-items-center gap-1 disabled" aria-disabled="true" title="No contents" tabindex="-1" aria-label="No download available">
                                 <span class="fs-5">⬇</span>
                                 <span class="small ms-1">0</span>
                             </button>
                             {{end}}
-                            <a href="/view/{{.Owner}}/{{.Name}}" class="btn btn-sm btn-outline-secondary">Browse</a>
+                            <a href="/view/{{.Owner}}/{{.Name}}" class="btn btn-sm btn-outline-primary">Browse</a>
                         </div>
                     </div>
                     {{end}}
@@ -131,15 +131,15 @@
                             <div class="meta text-secondary small fw-semibold">Owned by <span class="fw-semibold">{{.Owner}}</span> {{if .IsPrivate}}<span class="badge bg-warning text-dark ms-2">Private</span>{{end}}</div>
                         </div>
                         <div class="d-flex align-items-center gap-2">
-                            <button class="btn btn-sm btn-primary star-btn shadow-sm fw-bold px-2 rounded-pill d-inline-flex align-items-center gap-1" data-owner="{{.Owner}}" data-repo="{{.Name}}" aria-label="Toggle favorite" aria-pressed="{{if .IsFavorite}}true{{else}}false{{end}}">
+                            <button class="btn btn-sm btn-outline-primary star-btn shadow-sm fw-bold px-2 rounded-pill d-inline-flex align-items-center gap-1" data-owner="{{.Owner}}" data-repo="{{.Name}}" aria-label="Toggle favorite" aria-pressed="{{if .IsFavorite}}true{{else}}false{{end}}">
                                 <span class="star-glyph fs-5">{{if .IsFavorite}}★{{else}}☆{{end}}</span>
                                 <span class="small ms-1 star-count">{{.StarCount}}</span>
                             </button>
-                            <a href="/download/view/{{.Owner}}/{{.Name}}/HEAD" class="btn btn-sm btn-primary shadow-sm fw-bold px-2 rounded-pill d-inline-flex align-items-center gap-1" title="{{.DownloadCount}} downloads" role="button" aria-label="Download {{.Name}}">
+                            <a href="/download/view/{{.Owner}}/{{.Name}}/HEAD" class="btn btn-sm btn-outline-primary shadow-sm fw-bold px-2 rounded-pill d-inline-flex align-items-center gap-1" title="{{.DownloadCount}} downloads" role="button" aria-label="Download {{.Name}}">
                                 <span class="fs-5">⬇</span>
                                 <span class="small ms-1">{{.DownloadCount}}</span>
                             </a>
-                            <a href="/view/{{.Owner}}/{{.Name}}" class="btn btn-sm btn-outline-secondary">Browse</a>
+                            <a href="/view/{{.Owner}}/{{.Name}}" class="btn btn-sm btn-outline-primary">Browse</a>
                         </div>
                     </div>
                     {{end}}
