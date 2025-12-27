@@ -165,7 +165,7 @@
                     {{if eq $.Username $.Owner}}
                         <button class="btn btn-sm btn-outline-primary" id="editBtn" onclick="toggleEdit()">Edit</button>
                     {{end}}
-                    <button class="btn btn-sm btn-outline-secondary" onclick="copyToClipboard()">Copy</button>
+                    <button class="btn btn-sm btn-outline-primary" onclick="copyToClipboard()">Copy</button>
                 </div>
             </div>
             
@@ -181,7 +181,7 @@
                     <input type="hidden" name="path" value="{{if .CurrentPath}}{{.CurrentPath}}/{{end}}{{.FileName}}">
                     <textarea name="content" class="form-control editor-textarea" rows="20">{{.Content}}</textarea>
                     <div class="card-footer bg-body-tertiary text-end border-top">
-                        <button type="button" class="btn btn-sm btn-secondary me-2" onclick="toggleEdit()">Cancel</button>
+                        <button type="button" class="btn btn-sm btn-primary] me-2" onclick="toggleEdit()">Cancel</button>
                         <button type="submit" class="btn btn-sm btn-primary">Save Changes</button>
                     </div>
                 </form>
