@@ -604,6 +604,37 @@ func (m *RepoManager) GetStarCount(username, repoName string) int {
 	return count
 }
 
+// RepoHasCommits returns true if the repo has a HEAD/branches (i.e., some content)
+func (m *RepoManager) RepoHasCommits(username, repoName string) bool {
+	possiblePaths := []string{
+		filepath.Join(m.BaseDir, username, repoName+".git"),
+		filepath.Join(m.BaseDir, username, repoName),
+	}
+	for _, p := range possiblePaths {
+		gitRepo, err := git.PlainOpen(p)
+		if err != nil {
+			continue
+		}
+		// If HEAD exists, repo has commits
+		if _, err := gitRepo.Head(); err == nil {
+			return true
+		}
+		// Otherwise, check branches
+		br, err := gitRepo.Branches()
+		if err == nil {
+			has := false
+			br.ForEach(func(ref *plumbing.Reference) error {
+				has = true
+				return nil
+			})
+			if has {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // Favorites management
 func (m *RepoManager) AddFavorite(user, owner, repoName string) error {
 	query := `

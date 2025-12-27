@@ -28,6 +28,7 @@ func (m *RepoManager) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 		IsPrivate     bool
 		CreatedAt     time.Time
 		IsFavorite    bool
+		HasContent    bool
 	}
 	var allRepos []RepoInfo
 	var myRepos []RepoInfo
@@ -41,43 +42,66 @@ func (m *RepoManager) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 				ownerName := uDir.Name()
 				userPath := filepath.Join(m.BaseDir, ownerName)
 
-				// Scan this specific user's folder for .git repos
+				// Scan this specific user's folder for git repos (bare `.git` and non-bare)
 				repos, _ := os.ReadDir(userPath)
 				for _, rDir := range repos {
-					if rDir.IsDir() && strings.HasSuffix(rDir.Name(), ".git") {
-						repoName := strings.TrimSuffix(rDir.Name(), ".git")
+					if !rDir.IsDir() {
+						continue
+					}
+					name := rDir.Name()
+					repoName := ""
 
-						// Skip private repos for users who are not the owner
-						if isPriv, err := m.IsRepoPrivate(ownerName, repoName); err == nil && isPriv && username != ownerName {
-							continue
+					if strings.HasSuffix(name, ".git") {
+						repoName = strings.TrimSuffix(name, ".git")
+					} else {
+						// detect non-bare repo via `.git` subdir or HEAD file
+						possibleDotGit := filepath.Join(userPath, name, ".git")
+						if fi, err := os.Stat(possibleDotGit); err == nil && fi.IsDir() {
+							repoName = name
+						} else if _, err := os.Stat(filepath.Join(userPath, name, "HEAD")); err == nil {
+							repoName = name
 						}
+					}
 
-						// Fetch metadata from DB
-						count, createdAtStr, isPrivMeta, starCount, _ := m.GetRepoMeta(ownerName, repoName)
-						createdAt := time.Now()
-						if t, err := time.Parse("2006-01-02 15:04:05", createdAtStr); err == nil {
-							createdAt = t
-						}
+					if repoName == "" {
+						continue
+					}
 
-						isFav := false
-						if username != "" {
-							if fav, err := m.IsFavorite(username, ownerName, repoName); err == nil && fav {
-								isFav = true
-							}
-						}
+					// Skip private repos for users who are not the owner
+					if isPriv, err := m.IsRepoPrivate(ownerName, repoName); err == nil && isPriv && username != ownerName {
+						continue
+					}
 
-						repoInfo := RepoInfo{
-							Name:          repoName,
-							Owner:         ownerName,
-							DownloadCount: count,
-							StarCount:     starCount,
-							IsPrivate:     isPrivMeta,
-							CreatedAt:     createdAt,
-							IsFavorite:    isFav,
+					// Fetch metadata from DB
+					count, createdAtStr, isPrivMeta, starCount, _ := m.GetRepoMeta(ownerName, repoName)
+					createdAt := time.Now()
+					if t, err := time.Parse("2006-01-02 15:04:05", createdAtStr); err == nil {
+						createdAt = t
+					}
+
+					isFav := false
+					if username != "" {
+						if fav, err := m.IsFavorite(username, ownerName, repoName); err == nil && fav {
+							isFav = true
 						}
-						if username == ownerName {
-							myRepos = append(myRepos, repoInfo)
-						}
+					}
+
+					// Determine whether the repo has commits/content
+					hasContent := m.RepoHasCommits(ownerName, repoName)
+
+					repoInfo := RepoInfo{
+						Name:          repoName,
+						Owner:         ownerName,
+						DownloadCount: count,
+						StarCount:     starCount,
+						IsPrivate:     isPrivMeta,
+						CreatedAt:     createdAt,
+						IsFavorite:    isFav,
+						HasContent:    hasContent,
+					}
+					allRepos = append(allRepos, repoInfo)
+					if username == ownerName {
+						myRepos = append(myRepos, repoInfo)
 					}
 				}
 			}
